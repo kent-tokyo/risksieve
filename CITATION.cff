@@ -1,0 +1,59 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: risksieve
+abstract: >-
+  A Rust library that sieves predictions and decisions through
+  finite-sample and anytime-valid conformal risk guarantees, unifying
+  classical conformal risk control, anytime-valid conformal risk control,
+  non-monotonic conformal risk control, and SCoRE-style selective
+  deployment.
+version: 0.1.0
+date-released: "2026-07-27"
+license: "MIT OR Apache-2.0"
+repository-code: "https://github.com/kent-tokyo/risksieve"
+authors:
+  - alias: kent-tokyo
+    name: kent-tokyo
+references:
+  - type: article
+    title: "Conformal Risk Control"
+    year: 2024
+    url: "https://arxiv.org/abs/2208.02814"
+    authors:
+      - family-names: Angelopoulos
+        given-names: "Anastasios N."
+      - family-names: Bates
+        given-names: Stephen
+      - family-names: Fisch
+        given-names: Adam
+      - family-names: Lei
+        given-names: Lihua
+      - family-names: Schuster
+        given-names: Tal
+  - type: article
+    title: "Anytime-Valid Conformal Risk Control"
+    year: 2026
+    url: "https://arxiv.org/abs/2602.04364"
+    authors:
+      - family-names: Hultberg
+        given-names: Bror
+      - family-names: Zachariah
+        given-names: Dave
+      - family-names: Ribeiro
+        given-names: "Antônio H."
+  - type: article
+    title: "Conformal Risk Control for Non-Monotonic Losses"
+    year: 2026
+    url: "https://arxiv.org/abs/2602.20151"
+    authors:
+      - family-names: Angelopoulos
+        given-names: "Anastasios N."
+  - type: article
+    title: "Conformal Selective Prediction with General Risk Control"
+    year: 2026
+    url: "https://arxiv.org/abs/2603.24704"
+    authors:
+      - family-names: Bai
+        given-names: Tian
+      - family-names: Jin
+        given-names: Ying
