@@ -27,3 +27,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: EmbarkStudios/cargo-deny-action@v2
+
+  # Self-contained provenance unit tests for scripts/score_provenance.py
+  # (used by the SCoRE oracle fixture generator and comparison audit
+  # script). These need only the standard library and git -- no numpy,
+  # no network access, and no real Tian-Bai/SCoRE checkout -- so they run
+  # here unconditionally rather than only when someone remembers to run
+  # them locally. Regenerating the oracle fixture or re-running the
+  # official-SCoRE comparison audit is deliberately NOT part of CI (that
+  # needs a real checkout of an external repository); only these
+  # self-contained checks are.
+  python-provenance-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - run: python3 -m unittest discover -s scripts -p 'test_*.py' -v

@@ -6,6 +6,7 @@
     "commit_sha": "401b7caf6d030825ff67e8f08e44ba15ee8c94af",
     "score_py_blob_sha": "aa9d111b92fcf574b77f232039410e8a4c23f3f5",
     "package_version": "0.1.1",
+    "imported_score_py_path": "SCoRE/SCoRE.py",
     "generator_seed": 20260729,
     "generated_date": "2026-07-29",
     "generator_script": "scripts/oracles/generate_score_sdr.py",
