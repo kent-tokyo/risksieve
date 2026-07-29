@@ -15,11 +15,11 @@ Usage:
     python3 scripts/oracles/generate_score_sdr.py --repo /path/to/Tian-Bai/SCoRE/checkout
 
 `--repo` must point to a local checkout of
-https://github.com/Tian-Bai/SCoRE at commit
-401b7caf6d030825ff67e8f08e44ba15ee8c94af (package version 0.1.1); the
-script inserts it at the front of `sys.path` rather than requiring a pip
-install, and cross-checks a git commit if the checkout is a git repository.
-Requires `numpy` (the only runtime dependency `SCoRE.SCoRE` itself has).
+https://github.com/Tian-Bai/SCoRE whose git HEAD, `SCoRE/SCoRE.py` blob,
+and `SCoRE.__version__` exactly match this repository's pinned provenance
+(see `scripts/score_provenance.py`) -- this is verified and fails the
+script immediately if it does not hold, with no override flag. Requires
+`numpy` (the only runtime dependency `SCoRE.SCoRE` itself has).
 
 ## Why there is no "independent" (Equation 4.1) oracle column
 
@@ -27,11 +27,10 @@ Requires `numpy` (the only runtime dependency `SCoRE.SCoRE` itself has).
 `SCoRE_MDR_bf`, evaluates its objective at exactly `l in {0, 1}` and does
 not sweep the interior breakpoints Equation 4.1's infimum requires in
 general (this crate's own `risk_adjusted_evalue` does sweep them, per its
-module docs). A 5,000-trial comparison against a from-scratch full
-breakpoint enumeration found 1,380 mismatches, including cases where
-`SCoRE_MDR_bf` reports `+inf` for an input whose true value is finite
-(~7.05) -- see `docs/references.md` for the full note. `certify_independent`
-/ `risk_adjusted_evalue` were already validated in a prior milestone via
+module docs). `scripts/audits/compare_score_reference.py` measures how
+often this diverges from the true infimum -- see its own output and
+`docs/references.md` for the numbers. `certify_independent` /
+`risk_adjusted_evalue` were already validated in a prior milestone via
 hand-derivation and property tests and are not re-validated against this
 known-incomplete function here; this fixture's oracle comparison is scoped
 to the coupled construction, which is this PR's actual subject.
@@ -39,36 +38,21 @@ to the coupled construction, which is this PR's actual subject.
 
 import argparse
 import json
-import subprocess
 import sys
 from pathlib import Path
 
-EXPECTED_COMMIT = "401b7caf6d030825ff67e8f08e44ba15ee8c94af"
-EXPECTED_VERSION = "0.1.1"
-EXPECTED_SCORE_PY_BLOB_SHA = "aa9d111b92fcf574b77f232039410e8a4c23f3f5"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from score_provenance import (  # noqa: E402
+    LICENSE,
+    LICENSE_COPYRIGHT,
+    REPOSITORY,
+    ProvenanceError,
+    fail_with_provenance_error,
+    verify_score_checkout,
+)
+
 GENERATOR_SEED = 20260729
 GENERATED_DATE = "2026-07-29"
-
-
-def load_score_package(repo_path):
-    sys.path.insert(0, str(repo_path))
-    import SCoRE  # noqa: F401 -- import for its side effect on sys.modules
-    from SCoRE.SCoRE import SCoRE_SDR
-
-    return SCoRE_SDR
-
-
-def git_commit_sha(repo_path):
-    try:
-        out = subprocess.run(
-            ["git", "-C", str(repo_path), "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return out.stdout.strip()
-    except Exception:
-        return None
 
 
 def evaluate_case(SCoRE_SDR, Lcalib, Scalib, Stest, alpha, gamma):
@@ -295,28 +279,18 @@ def main():
     )
     args = parser.parse_args()
 
-    SCoRE_SDR = load_score_package(args.repo)
-
-    commit = git_commit_sha(args.repo)
-    if commit is not None and commit != EXPECTED_COMMIT:
-        print(
-            f"warning: checkout HEAD ({commit}) does not match the pinned "
-            f"commit ({EXPECTED_COMMIT}) this fixture's provenance records; "
-            "the JSON's commit_sha field will still record the pinned value.",
-            file=sys.stderr,
-        )
+    measured_provenance = verify_score_checkout(args.repo)
+    from SCoRE.SCoRE import SCoRE_SDR
 
     cases = build_fixed_cases(SCoRE_SDR)
     cases.extend(build_random_cases(SCoRE_SDR, GENERATOR_SEED, args.random_count))
 
     fixture = {
         "provenance": {
-            "repository": "https://github.com/Tian-Bai/SCoRE",
-            "package_version": EXPECTED_VERSION,
-            "commit_sha": EXPECTED_COMMIT,
-            "score_py_blob_sha": EXPECTED_SCORE_PY_BLOB_SHA,
-            "license": "MIT",
-            "license_copyright": "Copyright (c) 2026 Tian Bai and Ying Jin",
+            "repository": REPOSITORY,
+            "license": LICENSE,
+            "license_copyright": LICENSE_COPYRIGHT,
+            **measured_provenance,
             "generator_seed": GENERATOR_SEED,
             "generated_date": GENERATED_DATE,
             "generator_script": "scripts/oracles/generate_score_sdr.py",
@@ -324,9 +298,10 @@ def main():
                 "coupled_evalues come from SCoRE_SDR (Equation 5.1). There "
                 "is no independent (Equation 4.1) oracle column: "
                 "SCoRE_MDR_bf only checks l in {0,1} and was found to "
-                "diverge from the true infimum in ~28% of a 5000-trial "
-                "comparison, so it is not used as an oracle -- see "
-                "docs/references.md."
+                "diverge from the true infimum in a nontrivial fraction of "
+                "randomized trials, so it is not used as an oracle -- see "
+                "scripts/audits/compare_score_reference.py and "
+                "docs/references.md for the measured numbers."
             ),
         },
         "cases": cases,
@@ -341,4 +316,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except ProvenanceError as err:
+        fail_with_provenance_error(err)

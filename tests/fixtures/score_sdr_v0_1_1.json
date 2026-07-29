@@ -1,15 +1,15 @@
 {
   "provenance": {
     "repository": "https://github.com/Tian-Bai/SCoRE",
-    "package_version": "0.1.1",
-    "commit_sha": "401b7caf6d030825ff67e8f08e44ba15ee8c94af",
-    "score_py_blob_sha": "aa9d111b92fcf574b77f232039410e8a4c23f3f5",
     "license": "MIT",
     "license_copyright": "Copyright (c) 2026 Tian Bai and Ying Jin",
+    "commit_sha": "401b7caf6d030825ff67e8f08e44ba15ee8c94af",
+    "score_py_blob_sha": "aa9d111b92fcf574b77f232039410e8a4c23f3f5",
+    "package_version": "0.1.1",
     "generator_seed": 20260729,
     "generated_date": "2026-07-29",
     "generator_script": "scripts/oracles/generate_score_sdr.py",
-    "notes": "coupled_evalues come from SCoRE_SDR (Equation 5.1). There is no independent (Equation 4.1) oracle column: SCoRE_MDR_bf only checks l in {0,1} and was found to diverge from the true infimum in ~28% of a 5000-trial comparison, so it is not used as an oracle -- see docs/references.md."
+    "notes": "coupled_evalues come from SCoRE_SDR (Equation 5.1). There is no independent (Equation 4.1) oracle column: SCoRE_MDR_bf only checks l in {0,1} and was found to diverge from the true infimum in a nontrivial fraction of randomized trials, so it is not used as an oracle -- see scripts/audits/compare_score_reference.py and docs/references.md for the measured numbers."
   },
   "cases": [
     {

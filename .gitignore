@@ -10,3 +10,9 @@ Cargo.lock
 # AGENTS.md is the tracked engineering policy (see README's Contributing
 # section); CLAUDE.md is a local-only supplement to it and stays ignored.
 CLAUDE.md
+
+# Python bytecode cache from scripts/ (oracle generator, audit scripts,
+# and their tests) -- Python is a tooling-only dependency, never a Rust
+# runtime or CI one; see AGENTS.md section 9.5.
+__pycache__/
+*.pyc
