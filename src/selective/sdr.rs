@@ -1,8 +1,9 @@
 //! SCoRE-SDR: batch selective deployment controlling Selective Deployment
 //! Risk (Algorithm 2, Theorem 3.3).
 //!
-//! Bai and Jin (2026), arXiv:2603.24704, Algorithm 2 processes a batch of
-//! `m` unlabeled test points against one calibration set: compute a
+//! Bai and Jin (2026), *Conformal Selective Prediction with General Risk
+//! Control*, arXiv:2603.24704, Algorithm 2 processes a batch of `m`
+//! unlabeled test points against one calibration set: compute a
 //! per-test-point e-value for each, then apply eBH (Theorem 3.3, see
 //! [`super::ebh`]) to the batch to select a set `R` controlling
 //!
@@ -10,61 +11,53 @@
 //! SDR := E[ (sum_{j=1}^m L_{n+j} * 1{j in R}) / (1 v |R|) ] <= alpha
 //! ```
 //!
-//! ## Which e-value construction this module uses, and why
+//! ## Two e-value constructions, one selection engine
 //!
-//! The paper's own per-test-point e-value (its Equation 5.1) couples
-//! each test point's threshold search to *every other* test point in the
-//! batch: its normalizing function divides by `1 + sum_{k != j}
-//! 1{s(X_{n+k}) <= t}`, so `E_{n+j}` for one test point depends on all
-//! `m` test scores, not just calibration and its own score. The paper's
-//! "Algorithm 3" gives an efficient computation for this, but its exact
-//! steps were not extractable from this paper's HTML rendering across
-//! several independent, targeted fetch attempts (it was truncated every
-//! time). Absent that, deriving a correct algorithm independently (the
-//! way [`super::evalue`] derives Equation 4.1's infimum) is not
-//! straightforward here: that derivation relied on the per-threshold
-//! empirical-risk function being non-decreasing in the threshold `t`
-//! because it was a fixed-denominator sum; Equation 5.1's normalizing
-//! function is a *ratio* of two non-decreasing quantities (a numerator
-//! sum and a denominator count, both growing with `t`), and a ratio of
-//! two non-decreasing functions is not in general monotonic. Implementing
-//! this with the same confidence as Milestone 4 would require either
-//! recovering Algorithm 3's exact text or an independent proof of a
-//! correct computational method, neither of which has been done.
+//! [`certify`] uses the paper's own cross-test-point-coupled e-value
+//! (Equation 5.1, Theorem 5.1; see [`super::coupled`] for the full
+//! derivation) and is the default entry point for this module.
+//! [`certify_independent`] instead applies [`super::evalue::risk_adjusted_evalue`]
+//! (Equation 4.1) to each test point on its own, ignoring every other test
+//! point's score -- this was this crate's only SDR construction before
+//! Equation 5.1 was implemented, and remains available under an explicit
+//! name because it is simpler to reason about, cheaper (no per-test-point
+//! `O(n+m)` scan), and still a fully valid instantiation of Theorem 3.3
+//! (whose hypothesis only requires each e-value to individually satisfy
+//! Definition 3.1 -- it does not require Equation 5.1's specific
+//! construction). Both functions build their final certificate through
+//! the same private assembly step, so the eBH selection and certificate
+//! fields behave identically regardless of which e-value construction
+//! produced the input.
 //!
-//! **This module instead reuses [`super::evalue::risk_adjusted_evalue`]
-//! independently for each test point in the batch**, exactly as
-//! Milestone 4 uses it for a single test point. This remains a fully
-//! valid instantiation of Theorem 3.3: that theorem's hypothesis is only
-//! that each `E_{n+j}` individually satisfies Definition 3.1, which
-//! Theorem 4.2 establishes for `risk_adjusted_evalue`'s construction
-//! regardless of which other test points exist. What is lost is
-//! *selection power*, not validity -- the paper introduces Equation 5.1
-//! because accounting for competing test points is presumably more
-//! powerful in a multiple-testing sense, analogous to how Milestone 3's
-//! Theorem 1 remains valid for any beta-stable algorithm even though its
-//! concrete instances (deferred there too) give tighter bounds. See
-//! `tasks/todo.md` for tracking Equation 5.1 itself.
+//! **Neither construction is asserted to always dominate the other in
+//! selection power.** [`super::coupled`]'s module docs record what a
+//! numerical comparison across the shared test fixtures actually found
+//! (see also `docs/references.md`); the paper does not prove a general
+//! dominance result, so this crate does not claim one either.
 //!
 //! ## Assumptions
 //!
 //! Exchangeability here is required over the *entire* `{(X_i,Y_i)}_{i=1}^{n+m}`
 //! set (calibration plus every test point together), not just `n+1` as in
-//! [`super::mdr`] -- a strictly stronger assumption. A caller who submits
-//! adversarially selected or ordered test points as a batch is relying on
-//! this holding across all of them jointly, not on each test point being
-//! exchangeable with calibration in isolation.
+//! [`super::mdr`] -- a strictly stronger assumption, and one [`certify`]'s
+//! coupled construction actively uses (each test point's e-value depends
+//! on every other test point's score), not merely one stated for future
+//! extensions. A caller who submits adversarially selected or ordered test
+//! points as a batch is relying on this holding across all of them
+//! jointly, not on each test point being exchangeable with calibration in
+//! isolation.
 //!
 //! **The score function need not be calibrated or accurate** -- see
-//! [`super::evalue`]'s module docs; the same caution about selection
-//! power applies here.
+//! [`super::evalue`]'s module docs; the same caution about selection power
+//! applies here.
 //!
 //! **Provenance:** this paper postdates this project's training-data
 //! cutoff. The SDR definition, Algorithm 2's structure, and Theorem 3.3
 //! were cross-checked across independent fetches that agreed
-//! digit-for-digit; Equation 5.1 and Algorithm 3 were also confirmed
-//! present and consistent across fetches, but their exact computational
-//! treatment was not recoverable in enough detail to implement.
+//! digit-for-digit; Equation 5.1, Theorem 5.1, and Algorithm 3's
+//! computational structure were independently re-derived and cross-checked
+//! against `Tian-Bai/SCoRE`'s `SCoRE_SDR` (see [`super::coupled`] and
+//! `THIRD_PARTY_NOTICES.md`), rather than transcribed from a single fetch.
 
 use crate::certificate::{Diagnostics, RiskCertificate};
 use crate::error::RiskSieveError;
@@ -73,12 +66,50 @@ use crate::guarantee::{
     StabilityEvidence, SymmetryAssumption,
 };
 use crate::numerics::summation::kahan_sum;
-use crate::probability::{ClosedInterval, ClosedUnitInterval, OpenUnitInterval};
+use crate::probability::{ClosedInterval, ClosedUnitInterval, NonNegative, OpenUnitInterval};
+use crate::selective::coupled::coupled_risk_adjusted_evalues;
 use crate::selective::ebh;
 use crate::selective::evalue::risk_adjusted_evalue;
 
-/// Runs Algorithm 2 (SCoRE-SDR) over a batch of `test_scores` and returns
-/// the selected-set certificate.
+fn assemble_certificate(
+    evalues: &[NonNegative],
+    calibration_size: usize,
+    alpha: OpenUnitInterval,
+    gamma: OpenUnitInterval,
+) -> RiskCertificate<Vec<usize>> {
+    let selection = ebh::select(evalues, alpha);
+    let selected_count = selection.selected_indices.len();
+
+    let assumptions = Assumptions {
+        exchangeability: ExchangeabilityAssumption::Exchangeable,
+        bounded_loss: ClosedInterval::new(0.0, 1.0).expect("[0, 1] is a valid closed interval"),
+        monotonicity: MonotonicityAssumption::NonMonotone,
+        right_continuity: false,
+        symmetry: SymmetryAssumption::ProvenSymmetric,
+        stability: StabilityEvidence::Unknown,
+        shift: ShiftAssumption::NoShift,
+    };
+
+    RiskCertificate {
+        parameter: selection.selected_indices,
+        target_risk: alpha.get(),
+        certified_upper_bound: alpha.get(),
+        guarantee: GuaranteeKind::SelectiveDeploymentRisk,
+        assumptions,
+        calibration_size,
+        diagnostics: Diagnostics {
+            selected_count: Some(selected_count),
+            gamma: Some(gamma.get()),
+            ebh_tau_hat: selection.tau_hat,
+            uninformative_result: Some(selected_count == 0),
+            ..Default::default()
+        },
+    }
+}
+
+/// Runs Algorithm 2 (SCoRE-SDR) over a batch of `test_scores` using the
+/// paper's own cross-test-point-coupled e-value (Equation 5.1, Theorem
+/// 5.1; see [`super::coupled`]) and returns the selected-set certificate.
 ///
 /// `parameter` is the sorted-ascending list of selected indices into
 /// `test_scores` (AGENTS.md's "deterministic ordering" requirement). An
@@ -87,9 +118,9 @@ use crate::selective::evalue::risk_adjusted_evalue;
 ///
 /// # Errors
 ///
-/// Propagated from [`risk_adjusted_evalue`] for each test point: see its
-/// documentation for `calibration_losses`/`calibration_scores` length
-/// mismatches, an empty calibration set, or a non-finite score.
+/// See [`super::coupled::coupled_risk_adjusted_evalues`]: an empty
+/// calibration set, mismatched calibration lengths, or a non-finite
+/// calibration or test score.
 ///
 /// # Example
 ///
@@ -114,6 +145,51 @@ pub fn certify(
     alpha: OpenUnitInterval,
     gamma: OpenUnitInterval,
 ) -> Result<RiskCertificate<Vec<usize>>, RiskSieveError> {
+    let evalues =
+        coupled_risk_adjusted_evalues(calibration_losses, calibration_scores, test_scores, gamma)?;
+    Ok(assemble_certificate(
+        &evalues,
+        calibration_losses.len(),
+        alpha,
+        gamma,
+    ))
+}
+
+/// Runs Algorithm 2 (SCoRE-SDR) using [`super::evalue::risk_adjusted_evalue`]
+/// (Equation 4.1) applied independently to each test point, ignoring every
+/// other test point's score -- this crate's e-value construction before
+/// Equation 5.1 was implemented. See the module docs for why this remains
+/// available and valid rather than being replaced outright.
+///
+/// # Errors
+///
+/// Propagated from [`risk_adjusted_evalue`] for each test point: see its
+/// documentation for calibration length mismatches, an empty calibration
+/// set, or a non-finite score.
+///
+/// # Example
+///
+/// ```
+/// use risksieve::selective::sdr::certify_independent;
+/// use risksieve::{ClosedUnitInterval, GuaranteeKind, OpenUnitInterval};
+///
+/// let losses: Vec<ClosedUnitInterval> = (0..20)
+///     .map(|i| ClosedUnitInterval::new("loss", if i % 4 == 0 { 1.0 } else { 0.0 }).unwrap())
+///     .collect();
+/// let calibration_scores: Vec<f64> = (0..20).map(|i| i as f64).collect();
+/// let test_scores = [-5.0, -3.0, 50.0];
+/// let alpha = OpenUnitInterval::new("alpha", 0.3)?;
+/// let certificate = certify_independent(&losses, &calibration_scores, &test_scores, alpha, alpha)?;
+/// assert_eq!(certificate.guarantee, GuaranteeKind::SelectiveDeploymentRisk);
+/// # Ok::<(), risksieve::RiskSieveError>(())
+/// ```
+pub fn certify_independent(
+    calibration_losses: &[ClosedUnitInterval],
+    calibration_scores: &[f64],
+    test_scores: &[f64],
+    alpha: OpenUnitInterval,
+    gamma: OpenUnitInterval,
+) -> Result<RiskCertificate<Vec<usize>>, RiskSieveError> {
     let mut evalues = Vec::with_capacity(test_scores.len());
     for &test_score in test_scores {
         let outcome =
@@ -121,34 +197,12 @@ pub fn certify(
         evalues.push(outcome.value);
     }
 
-    let selection = ebh::select(&evalues, alpha);
-    let selected_count = selection.selected_indices.len();
-
-    let assumptions = Assumptions {
-        exchangeability: ExchangeabilityAssumption::Exchangeable,
-        bounded_loss: ClosedInterval::new(0.0, 1.0)?,
-        monotonicity: MonotonicityAssumption::NonMonotone,
-        right_continuity: false,
-        symmetry: SymmetryAssumption::ProvenSymmetric,
-        stability: StabilityEvidence::Unknown,
-        shift: ShiftAssumption::NoShift,
-    };
-
-    Ok(RiskCertificate {
-        parameter: selection.selected_indices,
-        target_risk: alpha.get(),
-        certified_upper_bound: alpha.get(),
-        guarantee: GuaranteeKind::SelectiveDeploymentRisk,
-        assumptions,
-        calibration_size: calibration_losses.len(),
-        diagnostics: Diagnostics {
-            selected_count: Some(selected_count),
-            gamma: Some(gamma.get()),
-            ebh_tau_hat: selection.tau_hat,
-            uninformative_result: Some(selected_count == 0),
-            ..Default::default()
-        },
-    })
+    Ok(assemble_certificate(
+        &evalues,
+        calibration_losses.len(),
+        alpha,
+        gamma,
+    ))
 }
 
 /// The *realized* (post-hoc) selective risk among the selected items,
@@ -199,23 +253,86 @@ mod tests {
     }
 
     #[test]
-    fn propagates_errors_from_per_item_evalue_computation() {
+    fn independent_empty_batch_is_also_a_valid_empty_certificate() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+        let certificate = certify_independent(&losses(&[1.0]), &[0.0], &[], alpha, alpha).unwrap();
+        assert_eq!(certificate.parameter, Vec::<usize>::new());
+    }
+
+    #[test]
+    fn propagates_errors_from_coupled_evalue_computation() {
         let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
         let err = certify(&losses(&[1.0]), &[0.0, 1.0], &[0.5], alpha, alpha).unwrap_err();
         assert!(matches!(err, RiskSieveError::AssumptionMismatch { .. }));
     }
 
     #[test]
-    fn selects_and_records_tau_hat() {
+    fn independent_propagates_errors_from_per_item_evalue_computation() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+        let err =
+            certify_independent(&losses(&[1.0]), &[0.0, 1.0], &[0.5], alpha, alpha).unwrap_err();
+        assert!(matches!(err, RiskSieveError::AssumptionMismatch { .. }));
+    }
+
+    #[test]
+    fn independent_selects_and_records_tau_hat() {
         // Same calibration fixture as `mdr::tests::deploys_when_evalue_clears_the_threshold`
         // (e-value 2.0 for a test point at score 1.0), repeated across a
-        // batch so eBH has something to select.
+        // batch so eBH has something to select. This is
+        // `certify_independent`'s pre-Equation-5.1 behavior, pinned here
+        // under its explicit name.
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+        let certificate =
+            certify_independent(&losses(&[0.0]), &[1.0], &[0.0, 0.0, 0.0], alpha, alpha).unwrap();
+        assert_eq!(certificate.parameter, vec![0, 1, 2]);
+        assert_eq!(certificate.diagnostics.selected_count, Some(3));
+        assert!(certificate.diagnostics.ebh_tau_hat.is_some());
+        assert_eq!(certificate.diagnostics.uninformative_result, Some(false));
+    }
+
+    #[test]
+    fn coupled_selects_and_records_tau_hat_on_the_same_fixture() {
+        // The coupled construction on the identical fixture: with three
+        // *identical* test points (m=3, all tied at score 0.0), each
+        // test point's "other test points below threshold" count is the
+        // same for all three by symmetry, so the coupled and independent
+        // constructions happen to agree here (worked out in
+        // `tests/paper_score_sdr.rs`); this is a coincidence of the tied
+        // fixture, not a general equivalence claim.
         let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
         let certificate = certify(&losses(&[0.0]), &[1.0], &[0.0, 0.0, 0.0], alpha, alpha).unwrap();
         assert_eq!(certificate.parameter, vec![0, 1, 2]);
         assert_eq!(certificate.diagnostics.selected_count, Some(3));
         assert!(certificate.diagnostics.ebh_tau_hat.is_some());
-        assert_eq!(certificate.diagnostics.uninformative_result, Some(false));
+    }
+
+    #[test]
+    fn coupled_and_independent_can_select_different_sets() {
+        // Found by random search over the official `Tian-Bai/SCoRE`
+        // oracle (`scripts/oracles/generate_score_sdr.py`'s search mode)
+        // and independently re-verified against this crate below: the
+        // coupled construction's e-value for the low-scoring test point
+        // (index 0) is 5.8530875 (computed against `SCoRE_SDR`), large
+        // enough to clear the eBH threshold on its own (m=2, alpha=0.519:
+        // tau=1 needs 2/(0.519*1)=3.853), while the same test point's
+        // independent (Equation 4.1) e-value is only 3.0525..., below
+        // that same threshold -- so the coupled construction selects it
+        // and the independent one does not. Index 1's e-value is 0 under
+        // both constructions (its own score is too high to be within any
+        // feasible threshold).
+        let calib_losses = losses(&[0.118, 0.9619, 0.9086, 0.6997, 0.2659]);
+        let calib_scores = [2.8151, 1.6725, 1.3013, -0.3038, -1.3666];
+        let test_scores = [-2.4217, 2.4156];
+        let alpha = OpenUnitInterval::new("alpha", 0.519).unwrap();
+        let gamma = OpenUnitInterval::new("gamma", 0.3417).unwrap();
+
+        let coupled = certify(&calib_losses, &calib_scores, &test_scores, alpha, gamma).unwrap();
+        let independent =
+            certify_independent(&calib_losses, &calib_scores, &test_scores, alpha, gamma).unwrap();
+
+        assert_eq!(coupled.parameter, vec![0]);
+        assert_eq!(independent.parameter, Vec::<usize>::new());
+        assert_ne!(coupled.parameter, independent.parameter);
     }
 
     #[test]
