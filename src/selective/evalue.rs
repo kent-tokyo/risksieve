@@ -61,7 +61,7 @@
 //! plateaus incrementally. Proposition 4.4 gives a closed-form shortcut
 //! for the special case `gamma <= alpha` that avoids this scan entirely;
 //! it is verified against this reference by a property test but not
-//! wired in as a separate code path (see `tasks/todo.md` -- this is not a
+//! wired in as a separate code path (see `docs/roadmap.md` -- this is not a
 //! hot loop, so the simpler `O(n^2)` reference is used unconditionally
 //! until profiling says otherwise).
 //!

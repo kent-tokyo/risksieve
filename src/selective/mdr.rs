@@ -49,7 +49,7 @@
 //! deployments); `gamma > alpha` remains valid (Theorem 4.2 holds for any
 //! fixed `gamma in (0,1)`) but its power degrades asymptotically to zero
 //! without an additional thresholding condition (Theorem 4.6, not
-//! implemented here -- see `tasks/todo.md`). This crate does not default
+//! implemented here -- see `docs/roadmap.md`). This crate does not default
 //! or silently pick `gamma`; pass `alpha` again as `gamma` if unsure.
 //!
 //! **The score function `s(.)` need not be calibrated or accurate for
@@ -210,7 +210,7 @@ mod tests {
     // implementation passes tests" requirement in AGENTS.md's Milestone
     // 4 description -- the shortcut is verified here against `certify`'s
     // general computation rather than wired in as a separate code path
-    // (see the module docs and `tasks/todo.md`).
+    // (see the module docs and `docs/roadmap.md`).
     //
     // `gamma = alpha * u` for `u` a fraction with denominator 16
     // guarantees `gamma <= alpha` by construction; losses are multiples

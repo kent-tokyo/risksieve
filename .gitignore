@@ -6,5 +6,7 @@ tasks/
 # Library crate, no binaries/reproducibility tooling yet: normal library
 # policy applies (AGENTS.md section 12), so Cargo.lock is not committed.
 Cargo.lock
-AGENTS.md
+
+# AGENTS.md is the tracked engineering policy (see README's Contributing
+# section); CLAUDE.md is a local-only supplement to it and stays ignored.
 CLAUDE.md

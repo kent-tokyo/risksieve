@@ -57,8 +57,8 @@ extracted and cross-checked.
 | Result | Implemented in |
 |---|---|
 | Theorem 1 (risk control from symmetry and beta-stability) | `src/nonmonotone/stability.rs::certify`, tested in `tests/paper_nonmonotone.rs` |
-| Proposition 1 (monotone CRC is the `beta = 0` special case) | not implemented or validated — checking it would require computing both sides of the beta-stability definition empirically (leave-one-out-average vs. full-sample risk); see `tasks/todo.md` |
-| Proposition 2 (bounded-loss discretization) | not yet implemented — its stated guarantee is an asymptotic `Õ(1/√n)` bound involving the Lambert W function, extracted with lower confidence than Theorem 1; see `tasks/todo.md` before implementing |
+| Proposition 1 (monotone CRC is the `beta = 0` special case) | not implemented or validated — checking it would require computing both sides of the beta-stability definition empirically (leave-one-out-average vs. full-sample risk); see `docs/roadmap.md` |
+| Proposition 2 (bounded-loss discretization) | not yet implemented — its stated guarantee is an asymptotic `Õ(1/√n)` bound involving the Lambert W function, extracted with lower confidence than Theorem 1; see `docs/roadmap.md` before implementing |
 | Proposition 3 / Corollary 2 (continuous Lipschitz losses) | not yet implemented (Milestone 3 follow-up) |
 | Proposition 4 / 5 / Corollary 3 (selective classification) | not yet implemented (Milestone 3 follow-up) |
 | Proposition 6 / Corollary 4 (regularized ERM) | not yet implemented (Milestone 3 follow-up) |
@@ -69,13 +69,17 @@ extracted and cross-checked.
 Tian Bai and Ying Jin. **Conformal Selective Prediction with General Risk
 Control.** 2026. arXiv:2603.24704. <https://arxiv.org/abs/2603.24704>
 
-Reference implementation (MIT): <https://github.com/Tian-Bai/SCoRE> — may
-be used as a behavioral test oracle and for independent cross-checking;
-this crate reimplements the paper idiomatically rather than translating
-the reference line by line. This paper postdates this project's
-training-data cutoff; see the provenance note in `src/selective/evalue.rs`
-for how Definition 3.1, Equation 4.1/4.2, Theorem 4.2, and Remark 4.5 were
-extracted and cross-checked.
+Reference implementation (MIT): <https://github.com/Tian-Bai/SCoRE>,
+commit `401b7caf6d030825ff67e8f08e44ba15ee8c94af` (package version
+`0.1.1`; `SCoRE/SCoRE.py` blob SHA
+`aa9d111b92fcf574b77f232039410e8a4c23f3f5`) — used as a behavioral test
+oracle and for independent cross-checking; this crate reimplements the
+paper idiomatically rather than translating the reference line by line.
+This paper postdates this project's training-data cutoff; see the
+provenance note in `src/selective/evalue.rs` for how Definition 3.1,
+Equation 4.1/4.2, Theorem 4.2, and Remark 4.5 were extracted and
+cross-checked, and `src/selective/coupled.rs` for Equation 5.1, Theorem
+5.1, and Algorithm 3.
 
 | Result | Implemented in |
 |---|---|
@@ -85,14 +89,101 @@ extracted and cross-checked.
 | MDR definition and Theorem 3.2 (MDR control) | `src/selective/mdr.rs::certify`, tested in `tests/paper_score_mdr.rs` |
 | Algorithm 1 (SCoRE-MDR) | `src/selective/mdr.rs::certify` |
 | Implied TDR (summing MDR across m test points) | documented only (`src/selective/mdr.rs` module docs); no batch API yet |
-| Proposition 4.4 (efficient shortcut for gamma <= alpha) | verified against `risk_adjusted_evalue` by a property test (`src/selective/mdr.rs`'s `score_proposition_4_4_shortcut_matches_general_decision`) but not wired in as a separate code path; see `tasks/todo.md` |
-| Remark 4.5 / Theorem 4.6 (gamma > alpha power loss, extra thresholding condition) | Remark 4.5's guidance is documented; Theorem 4.6's extra condition is not implemented — `gamma > alpha` remains accepted (valid per Theorem 4.2) but with undocumented power, see `tasks/todo.md` |
+| Proposition 4.4 (efficient shortcut for gamma <= alpha) | verified against `risk_adjusted_evalue` by a property test (`src/selective/mdr.rs`'s `score_proposition_4_4_shortcut_matches_general_decision`) but not wired in as a separate code path; see `docs/roadmap.md` |
+| Remark 4.5 / Theorem 4.6 (gamma > alpha power loss, extra thresholding condition) | Remark 4.5's guidance is documented; Theorem 4.6's extra condition is not implemented — `gamma > alpha` remains accepted (valid per Theorem 4.2) but with undocumented power, see `docs/roadmap.md` |
 | SDR definition (Equation 2.3) | `src/selective/ebh.rs`, `src/selective/sdr.rs`, tested in `tests/paper_score_sdr.rs` |
-| Theorem 3.3 (eBH selection controls SDR) | `src/selective/ebh.rs::select` — deliberately generic over any e-values individually satisfying Definition 3.1, not specific to Equation 5.1 |
-| Algorithm 2 (SCoRE-SDR) | `src/selective/sdr.rs::certify`, composing `ebh::select` with Milestone 4's `evalue::risk_adjusted_evalue` applied independently per test point |
-| Equation 5.1 / Algorithm 3 (the paper's own cross-test-point-coupled e-value and its efficient computation) | not implemented — Algorithm 3's exact steps were not extractable across several independent, targeted fetches (consistently truncated), and Equation 5.1's normalizing function is a ratio of two non-decreasing-in-`t` quantities, so the monotonicity argument `evalue.rs`'s Equation 4.1 derivation relies on does not obviously extend; see `src/selective/sdr.rs` module docs and `tasks/todo.md`. `sdr::certify` remains valid without it (Theorem 3.3's hypothesis does not require this specific construction) but is presumably less powerful than the paper's own version. |
+| Theorem 3.3 (eBH selection controls SDR) | `src/selective/ebh.rs::select` — deliberately generic over any e-values individually satisfying Definition 3.1, works for either e-value construction below |
+| Algorithm 2 (SCoRE-SDR), paper-exact e-value | `src/selective/sdr.rs::certify` (default), composing `ebh::select` with `coupled::coupled_risk_adjusted_evalues` (Equation 5.1) |
+| Algorithm 2 (SCoRE-SDR), independent e-value | `src/selective/sdr.rs::certify_independent`, composing `ebh::select` with Milestone 4's `evalue::risk_adjusted_evalue` applied independently per test point; kept for comparison and backward compatibility |
+| Equation 5.1 / Theorem 5.1 / Algorithm 3 (the paper's own cross-test-point-coupled e-value, its validity, and its efficient computation) | `src/selective/coupled.rs::coupled_risk_adjusted_evalues`, independently derived from the equation (not translated from `SCoRE_SDR`) and cross-checked against it; see "Equation 5.1 audit" below |
 | Zero-selection behavior | `src/selective/ebh.rs::select` (returns an empty, valid selection when no `tau` qualifies) and `src/selective/sdr.rs::realized_selective_risk` (the `max(1, selected_count)` denominator) |
-| Weighted extensions under covariate shift | not yet implemented — deferred within Milestone 6 in favor of the shifted anytime controller (AGENTS.md's backlog item 18 before item 19); see `tasks/todo.md` |
+| Weighted extensions under covariate shift | not yet implemented — deferred within Milestone 6 in favor of the shifted anytime controller (AGENTS.md's backlog item 18 before item 19); see `docs/roadmap.md` |
+
+### Equation 5.1 audit
+
+Correspondence between the paper's own notation, `SCoRE_SDR`'s variable
+names, and this crate's `src/selective/coupled.rs` (the full derivation,
+including why a suffix maximum is used and why the objective is clamped
+to `[0,1]`, lives in that module's doc comment; this is the compact
+summary AGENTS.md's citation policy and this PR's own review process
+call for):
+
+| Concept | Paper | `SCoRE_SDR` | This crate |
+|---|---|---|---|
+| Cumulative calibration loss at/below a threshold | `sum_i L_i * 1{s(X_i)<=t}` | `NUMER[i]` | `calib_prefix[k]` |
+| Count of *other* test points at/below a threshold, plus 1 | `1 + sum_{k'!=j} 1{s(X_{n+k'})<=t}` | `DENOM[i] - (Stest[j]<=t)` | `denom_excl_j(k)` |
+| Why test point `j` is excluded from its own denominator | its own indicator is priced by the numerator's `l * 1{...}` term instead, which the infimum varies; counting it in the denominator too would double-count the same indicator | (same reasoning, implicit) | see `coupled.rs` module docs |
+| `FR_0`, `FR_1` | `FR_{n+j}(t;0)`, `FR_{n+j}(t;1)` | `FR_0[i]`, `FR_1[i]` | `fr0_feasible`/`fr1_feasible` (cross-multiplied comparisons, avoiding a division) |
+| `ell` / breakpoint candidate | Algorithm 3's own `l-bar(t)` (`(n+1)*gamma/m*(...) - sum L_i*1{...}`, see the paper's Section 5) | `ELL[i]` | `ell_bar(k)` |
+| `t_0`, `t_1` | `t_{gamma,n+j}(0)`, `t_{gamma,n+j}(1)` | `t_0`, `t_1` | `t0`, `t1` |
+| Candidate set `M_star` | thresholds surviving Algorithm 3's pruning | `M_star` | the `k` range scanned after the suffix-maximum filter |
+| Why a suffix maximum | a threshold's breakpoint is irrelevant once a strictly larger, also-feasible threshold has an equal-or-larger breakpoint (that larger threshold already covers every `l` the smaller one would have been optimal for) | `max_ell` (backward pass) | `suffix_max_ell` (backward pass) |
+| Final e-value | `E_{gamma,n+j}` | `evalues[j]` | the returned `NonNegative` per test point |
+| Composition with eBH | Theorem 3.3 applied to `{E_{gamma,n+j}}` | `eBH(evalues, alpha)` | `sdr::certify` calling `ebh::select` |
+| Exchangeability required | `{(X_i,Y_i)}_{i=1}^{n+m}` jointly | (assumed by the caller) | documented in `sdr.rs` and `coupled.rs` module docs |
+
+**Differences from the official implementation, found by construction and
+confirmed numerically, not guessed:**
+
+- **`ell_bar` clamping.** Equation 5.1's infimum ranges over `l in [0,1]`,
+  but `SCoRE_SDR` evaluates its objective at the raw, unclamped
+  `ell_bar(t)`, which can exceed `1` (confirmed: `5,142` such events across
+  `50,000` randomized/adversarial trials). This crate clamps `ell_bar(t)`
+  to `[0,1]` before evaluating the objective, matching the equation's
+  stated domain. The same 50,000-trial comparison found **zero** resulting
+  differences in the final e-value or selected set between the clamped
+  and unclamped versions — the divergence exists in the code but was not
+  observed to change any output. The comparison script that produced these
+  numbers is recorded in `THIRD_PARTY_NOTICES.md`.
+- **`gamma`'s domain.** The paper states Theorem 5.1 for any `gamma > 0`
+  with no upper bound (Section 5), strictly wider than Equation 4.1's
+  `gamma in (0,1)` (Theorem 4.2) — Equation 5.1's normalizer carries an
+  extra `m/(n+1)` scale factor Equation 4.1 does not. `SCoRE_SDR`'s own
+  `_validate_gamma`, however, rejects `gamma > 1`. This crate follows the
+  official implementation's narrower `(0,1)` domain (via `OpenUnitInterval`,
+  the same type Equation 4.1 already uses) rather than the paper's wider
+  one, for three reasons: the oracle fixtures this module is cross-checked
+  against cannot exercise `gamma > 1` either, since `SCoRE_SDR` itself
+  refuses it; the paper's own recommended default (`gamma = alpha`) is
+  always in `(0,1)`; and it keeps `gamma`'s type consistent across
+  `evalue::risk_adjusted_evalue`, `sdr::certify_independent`, and
+  `sdr::certify`. At `gamma = 0` exactly, the coupled e-value's true
+  mathematical infimum can be `+infinity` (every `M_star` candidate's
+  denominator is `gamma*(n+1)/m*denom_excl_j`, which vanishes only at
+  `gamma = 0`) — `OpenUnitInterval` already excludes this endpoint, which
+  is why no dedicated infinite-e-value type was introduced. A constructed
+  scenario stressing the `m/(n+1)` scaling (large `m`, few test points
+  below the calibration region) did not find a case where allowing `gamma`
+  up to `5.0` changed the selected set relative to capping it at `1.0`;
+  see `src/selective/coupled.rs`'s module docs for the numbers.
+- **`SCoRE_MDR_bf` (the official brute-force reference for Equation 4.1)
+  is incomplete, not just differently-scoped.** It evaluates its objective
+  at exactly `l in {0, 1}`, missing the interior breakpoints Equation
+  4.1's infimum requires in general (this crate's own
+  `risk_adjusted_evalue` sweeps all of them). A 5,000-trial comparison
+  against a from-scratch full breakpoint enumeration found 1,380
+  mismatches (`27.6%`), including cases where `SCoRE_MDR_bf` reports
+  `+inf` for an input whose true value is finite (`~7.05` in the worst
+  case observed). Consequence: this crate's oracle fixture
+  (`tests/fixtures/score_sdr_v0_1_1.json`) has no independent-construction
+  column sourced from `SCoRE_MDR_bf` — `certify_independent`
+  /`risk_adjusted_evalue` were already validated in a prior milestone via
+  hand-derivation and property tests, and are cross-checked against the
+  coupled construction purely in Rust
+  (`tests/paper_score_sdr.rs::score_algorithm_2_sdr_coupled_and_independent_can_disagree`),
+  not against this known-incomplete function.
+
+**Selection-power comparison (measured, not asserted):** the coupled and
+independent constructions select different sets on some inputs (see the
+fixture above: coupled selects a test point the independent construction
+does not, because the coupled denominator only has to account for the
+test batch's own size, one point of which is excluded as "self", while
+the independent denominator gets no such adjustment). On other inputs
+(for example, several test points tied at an identical score) they
+coincide, by symmetry. Neither the paper nor this crate proves the
+coupled construction dominates the independent one in general — see
+`src/selective/sdr.rs`'s module docs and `docs/roadmap.md` for what a
+systematic power study would still need to check.
 
 ## Implemented so far
 
@@ -134,13 +225,20 @@ table above for what is deferred):
 - `src/selective/mdr.rs::certify` — the deployment decision and
   `MarginalDeploymentRisk` certificate.
 
-**Milestone 5** provides batch SCoRE-SDR (Theorem 3.3 and Algorithm 2,
-composed from Milestone 4's e-value construction; Equation 5.1/Algorithm
-3 deferred — see the table above):
+**Milestone 5** provides batch SCoRE-SDR, including the paper's own
+cross-test-point-coupled e-value (Theorem 3.3, Algorithm 2, Equation 5.1,
+Theorem 5.1; randomized pruning and weighted SDR deferred — see
+`docs/roadmap.md`):
 
 - `src/selective/ebh.rs::select` — the generic eBH selection engine.
-- `src/selective/sdr.rs::certify` — the batch entry point and
-  `SelectiveDeploymentRisk` certificate.
+- `src/selective/coupled.rs::coupled_risk_adjusted_evalues` — the
+  paper-exact, cross-test-point-coupled e-value construction (Equation
+  5.1 / Algorithm 3).
+- `src/selective/sdr.rs::certify` — the default batch entry point (uses
+  the coupled construction) and `SelectiveDeploymentRisk` certificate.
+- `src/selective/sdr.rs::certify_independent` — the same entry point using
+  Milestone 4's e-value construction applied independently per test
+  point, kept for comparison and backward compatibility.
 - `src/selective/sdr.rs::realized_selective_risk` — the post-hoc,
   label-requiring realized-risk helper.
 

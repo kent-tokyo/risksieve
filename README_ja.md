@@ -7,8 +7,11 @@
 
 **Milestone 0(語彙)、Milestone 1(古典的単調CRC)、Milestone 2(anytime-valid
 単調CRC)、Milestone 3(非単調CRC、部分的)、Milestone 4(SCoRE-MDR、部分的)、
-Milestone 5(SCoRE-SDR、部分的)、Milestone 6(分布シフト、部分的)が完了。**
-Milestone 7(下流の実例)はまだ未実装。
+Milestone 5(SCoRE-SDR)、Milestone 6(分布シフト、部分的)が完了。**
+Milestone 5には論文のオプション機能であるrandomized pruning(公式実装の
+`prune='hete'` / `'homo'`)とweighted SDRはまだ含まれていない — 詳細は
+下記のMilestone 5の段落と`docs/roadmap.md`を参照。Milestone 7(下流の実例)
+はまだ未実装。
 
 Milestone 0 で提供するもの:
 
@@ -39,7 +42,7 @@ beta-stability の還元 `risksieve::nonmonotone::stability::certify` を追加�
 と、symmetryの宣言・stability evidenceを渡し、この関数はTheorem 1の前提条件を
 検証して証明書を組み立てるだけ。今回実装したのはTheorem 1のみで、論文が示す
 具体的な安定性の構成(離散化損失、Lipschitz損失、選択的分類、正則化ERM)は
-`tasks/todo.md` に記録している。
+`docs/roadmap.md` に記録している。
 
 Milestone 4 では、SCoRE-MDR の直接デプロイ判定
 `risksieve::selective::evalue::risk_adjusted_evalue` と
@@ -52,17 +55,25 @@ Definition 3.1、Equation 4.1、Algorithm 1、Theorem 3.2)。探索型の他の
 
 Milestone 5 では、バッチ処理の SCoRE-SDR
 `risksieve::selective::sdr::certify` を追加した(Bai and Jin (2026) の
-Algorithm 2、Theorem 3.3)。これは汎用的な eBH 選択エンジン
-(`risksieve::selective::ebh::select`)と、Milestone 4 のテスト点ごとの
-e値構成をバッチ内の各項目に独立に適用したものを組み合わせて構築している
-— 論文自身が示す、テスト点間で結合した構成(Equation 5.1)ではない。
-Equation 5.1 の効率的計算アルゴリズム(Algorithm 3)を確信を持って抽出
-できなかったこと、その正規化関数の閾値に対する単調性が自明でないことから、
-今回は見送った(`tasks/todo.md` 参照)。統計的な妥当性は保たれるが、論文
-自身の構成より検出力(power)は劣ると見込まれる。選択集合が空であることは
-証明書として正当であり、エラーではない。`risksieve::selective::sdr::realized_selective_risk`
-はラベルが判明した後の事後的な実現リスクを計算するが、証明書そのものと
-混同されないよう単なる数値を返す。
+Algorithm 2、Theorem 3.3)。論文自身が示す、テスト点間で結合したe値構成
+(Equation 5.1、Theorem 5.1、新しい`risksieve::selective::coupled`モジュール)
+を使い、汎用的な eBH 選択エンジン(`risksieve::selective::ebh::select`)
+と組み合わせて構築している。以前の構成 — Milestone 4 のe値構成をバッチ内の
+各項目に独立に適用したもの、他のテスト点を一切考慮しない — は
+`risksieve::selective::sdr::certify_independent` として引き続き利用できる:
+これもTheorem 3.3の正当なインスタンス化である(同定理の前提条件は各e値が
+個別にDefinition 3.1を満たすことのみを要求する)。比較用・後方互換用として
+残している。両者は常に同じ選択集合を返すわけではない — `docs/references.md`
+に、両者が異なる選択をするfixtureと、対称性により一致するfixtureの両方を
+記録している。論文もこのcrateも、一方が他方を常に上回ることは証明していない。
+結合構成は`Tian-Bai/SCoRE`自身の`SCoRE_SDR`との照合(30件のfixture、
+`tests/score_sdr_oracle.rs`)と、SDR保証そのもののモンテカルロ・シミュレーション
+(`tests/statistical_validity.rs`、このcrateのtier 4の最初のエントリ)で
+検証している。選択集合が空であることは証明書として正当であり、エラーでは
+ない。`risksieve::selective::sdr::realized_selective_risk`はラベルが判明した
+後の事後的な実現リスクを計算するが、証明書そのものと混同されないよう単なる
+数値を返す。randomized pruning(公式実装ではオプションの検出力向上策)と
+weighted SDRは未実装 — `docs/roadmap.md`を参照。
 
 Milestone 6 では、分布シフト下での重要度重み付き anytime-valid CRC
 `risksieve::anytime::AnytimeShiftedController`(Hultberg, Zachariah,
@@ -75,7 +86,7 @@ m* は Milestone 2 のように事前計算できない — Theorem 4.7 の m* �
 暗黙のデフォルトを持たないフィールドであり、`KnownDensityRatio` は
 有限サンプルの保証をフルに与えるが、`Estimated` は漸近的な保証に格下げ
 される — 論文が推定された重みについて有限サンプルの妥当性を示していない
-ため。重み付き SCoRE は見送った(`tasks/todo.md` 参照)。
+ため。重み付き SCoRE は見送った(`docs/roadmap.md` 参照)。
 
 実装の全体シーケンスは `AGENTS.md` の第7章、現時点でのテスト範囲は
 `docs/validation.md` を参照。
