@@ -137,8 +137,12 @@ fn score_equation_5_1_coupled_evalue_matches_hand_computation() {
 /// account for `m=2` test points total, one of which is excluded as
 /// "self") clears the `alpha=0.519`, `m=2` eBH threshold at `tau=1`
 /// (`2/(0.519*1) = 3.8536...`), while its independent (Equation 4.1)
-/// e-value (`3.0525...`, computed against the *same* calibration set but
-/// without any batch-size adjustment) does not.
+/// e-value (`2.9265437518290893`, this crate's own
+/// `risk_adjusted_evalue`, computed against the *same* calibration set
+/// but without any batch-size adjustment) does not. (The official
+/// `SCoRE_MDR_bf` brute force reports `3.0525030525030523` for this same
+/// input -- also below the threshold, so the qualitative conclusion is
+/// unaffected, but the number itself is wrong; see `docs/references.md`.)
 #[test]
 fn score_algorithm_2_sdr_coupled_and_independent_can_disagree() {
     let calib_losses = [

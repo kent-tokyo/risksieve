@@ -315,11 +315,15 @@ mod tests {
         // (index 0) is 5.8530875 (computed against `SCoRE_SDR`), large
         // enough to clear the eBH threshold on its own (m=2, alpha=0.519:
         // tau=1 needs 2/(0.519*1)=3.853), while the same test point's
-        // independent (Equation 4.1) e-value is only 3.0525..., below
-        // that same threshold -- so the coupled construction selects it
-        // and the independent one does not. Index 1's e-value is 0 under
-        // both constructions (its own score is too high to be within any
-        // feasible threshold).
+        // independent (Equation 4.1) e-value is only 2.9265437518290893
+        // (this crate's own `risk_adjusted_evalue`), below that same
+        // threshold -- so the coupled construction selects it and the
+        // independent one does not. Index 1's e-value is 0 under both
+        // constructions (its own score is too high to be within any
+        // feasible threshold). Note: the official `SCoRE_MDR_bf` brute
+        // force reports 3.0525030525030523 for this same input, which is
+        // wrong -- see `docs/references.md` for why that function is not
+        // used as an oracle in this crate.
         let calib_losses = losses(&[0.118, 0.9619, 0.9086, 0.6997, 0.2659]);
         let calib_scores = [2.8151, 1.6725, 1.3013, -0.3038, -1.3666];
         let test_scores = [-2.4217, 2.4156];
