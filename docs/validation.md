@@ -166,3 +166,41 @@ Tier 6 (regressions) has no entries yet. Each remaining tier or
 per-milestone gap activates as the work in `docs/roadmap.md` that needs it
 lands; this file will list the actual test names and fixture locations as
 they are added, rather than describing them abstractly.
+
+## Timing comparison: coupled vs. independent SDR (informal)
+
+`tests/timing_comparison.rs` (`#[ignore]`d, not `criterion` — see its own
+module docs for why a benchmark dependency wasn't added for a single
+comparative reading) measures `sdr::certify` (coupled) against
+`sdr::certify_independent` at three fixed input sizes, in release mode,
+with a 5-iteration warm-up and the median of 20 measured iterations
+reported. Run it with:
+
+```bash
+cargo test --release --test timing_comparison -- --ignored --nocapture
+```
+
+Measured on `aarch64-macos` (Darwin 25.5.0), `rustc 1.97.0 (2d8144b78
+2026-07-07)`, `risksieve` at this PR's HEAD:
+
+| size | `n` | `m` | coupled (median) | independent (median) |
+|---|---|---|---|---|
+| small | 20 | 5 | 4.542 µs | 10.5 µs |
+| medium | 200 | 50 | 66.084 µs | 883.959 µs |
+| large | 2000 | 500 | 6.772417 ms | 312.535459 ms |
+
+The coupled construction was faster at all three sizes tested here, by a
+growing margin as `n` increases. This tracks the two constructions'
+different complexity classes, not a coincidence of these particular
+sizes: `certify_independent` calls `risk_adjusted_evalue` once per test
+point, and that reference implementation is `O(n^2)` per call (its own
+breakpoint-enumeration reference scan, deliberately left unoptimized per
+AGENTS.md's "reference implementation first" policy — Proposition 4.4's
+closed-form shortcut is verified equivalent but not wired in as a
+separate code path, see `docs/roadmap.md`), giving `certify_independent`
+an overall `O(m * n^2)`. `certify`'s coupled construction is `O((n+m)
+log(n+m) + m(n+m))` overall. For any fixed `m`, `n^2` eventually
+dominates `n+m` as `n` grows, so the coupled construction should keep
+winning at larger `n` than tested here too — but this has only been
+measured at `n <= 2000`, not proven as a universal ordering, and a
+different `n`/`m` ratio (very large `m`, small `n`) was not swept.
