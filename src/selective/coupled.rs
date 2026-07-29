@@ -161,6 +161,7 @@
 //! of `O((n+m)m + (n+m)log(n+m))` for Algorithm 3.
 
 use crate::error::RiskSieveError;
+use crate::numerics::summation::kahan_sum;
 use crate::probability::{ClosedUnitInterval, NonNegative, OpenUnitInterval, check_finite};
 
 fn normalize_zero(x: f64) -> f64 {
@@ -184,6 +185,18 @@ fn feasibility_epsilon(rhs: f64) -> f64 {
 /// value up front rather than sorted-with-duplicates-then-fixed-up (unlike
 /// `SCoRE_SDR`'s tuple sort, which relies on a post-hoc tie-correction
 /// pass; see the module docs).
+///
+/// **Within a tied score, the calibration losses are summed in a
+/// canonical order (sorted by loss value via [`f64::total_cmp`]), not
+/// input order.** Grouping by score alone (a stable sort keyed only on
+/// `score`) would leave tied entries in whatever relative order the
+/// caller happened to supply them in, so two calls with the same
+/// `(score, loss)` multiset but a different input order could sum a
+/// tied group's losses in a different sequence and land on a different
+/// floating-point rounding. Sorting by `(score, loss)` before summing
+/// makes the sum depend only on the multiset, never on input order --
+/// verified as an exact (not approximate) equality by
+/// `tests::calibration_and_test_batch_order_is_invariant` below.
 struct GroupedScores {
     values: Vec<f64>,
     calib_loss_sum: Vec<f64>,
@@ -195,32 +208,74 @@ fn group_scores(
     calibration_scores: &[f64],
     test_scores: &[f64],
 ) -> GroupedScores {
-    let mut entries: Vec<(f64, f64, usize)> =
-        Vec::with_capacity(calibration_scores.len() + test_scores.len());
-    entries.extend(
-        calibration_scores
-            .iter()
-            .zip(calibration_losses.iter())
-            .map(|(&score, &loss)| (normalize_zero(score), loss.get(), 0usize)),
-    );
-    entries.extend(
-        test_scores
-            .iter()
-            .map(|&score| (normalize_zero(score), 0.0, 1usize)),
-    );
-    entries.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut calib_entries: Vec<(f64, f64)> = calibration_scores
+        .iter()
+        .zip(calibration_losses.iter())
+        .map(|(&score, &loss)| (normalize_zero(score), loss.get()))
+        .collect();
+    calib_entries.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.total_cmp(&b.1)));
 
+    let mut calib_values: Vec<f64> = Vec::new();
+    let mut calib_group_sum: Vec<f64> = Vec::new();
+    let mut group_start = 0;
+    for i in 0..=calib_entries.len() {
+        let at_boundary =
+            i == calib_entries.len() || calib_entries[i].0 != calib_entries[group_start].0;
+        if at_boundary && i > group_start {
+            calib_values.push(calib_entries[group_start].0);
+            calib_group_sum.push(kahan_sum(
+                calib_entries[group_start..i].iter().map(|&(_, loss)| loss),
+            ));
+            group_start = i;
+        }
+    }
+
+    let mut sorted_test_scores: Vec<f64> = test_scores.iter().map(|&s| normalize_zero(s)).collect();
+    sorted_test_scores.sort_by(f64::total_cmp);
+    let mut test_values: Vec<f64> = Vec::new();
+    let mut test_group_count: Vec<usize> = Vec::new();
+    for value in sorted_test_scores {
+        if test_values.last() == Some(&value) {
+            *test_group_count.last_mut().expect("kept in lockstep") += 1;
+        } else {
+            test_values.push(value);
+            test_group_count.push(1);
+        }
+    }
+
+    // Merge the two independently deduplicated, ascending-sorted value
+    // lists into their union, matching values present in either or both.
     let mut values = Vec::new();
     let mut calib_loss_sum = Vec::new();
     let mut test_count = Vec::new();
-    for (score, loss, is_test) in entries {
-        if values.last() == Some(&score) {
-            *calib_loss_sum.last_mut().expect("kept in lockstep") += loss;
-            *test_count.last_mut().expect("kept in lockstep") += is_test;
-        } else {
-            values.push(score);
-            calib_loss_sum.push(loss);
-            test_count.push(is_test);
+    let (mut i, mut j) = (0, 0);
+    while i < calib_values.len() || j < test_values.len() {
+        let cmp = match (i < calib_values.len(), j < test_values.len()) {
+            (true, true) => calib_values[i].total_cmp(&test_values[j]),
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            (false, false) => unreachable!("loop condition guarantees at least one side remains"),
+        };
+        match cmp {
+            std::cmp::Ordering::Less => {
+                values.push(calib_values[i]);
+                calib_loss_sum.push(calib_group_sum[i]);
+                test_count.push(0);
+                i += 1;
+            }
+            std::cmp::Ordering::Greater => {
+                values.push(test_values[j]);
+                calib_loss_sum.push(0.0);
+                test_count.push(test_group_count[j]);
+                j += 1;
+            }
+            std::cmp::Ordering::Equal => {
+                values.push(calib_values[i]);
+                calib_loss_sum.push(calib_group_sum[i]);
+                test_count.push(test_group_count[j]);
+                i += 1;
+                j += 1;
+            }
         }
     }
 
@@ -536,6 +591,63 @@ mod tests {
     }
 
     #[test]
+    fn tied_score_loss_summation_is_bit_exact_under_any_input_order() {
+        // Many calibration points tied at the same score, with losses
+        // chosen adversarially for floating-point summation: not exactly
+        // representable in binary (`0.1`, `0.2`, `0.3`) and spanning very
+        // different magnitudes (`1e-16`, `1e-12`, close to `1.0`).
+        // `group_scores` must sum these in a canonical `(score, loss)`
+        // order regardless of the order the caller supplies them in, so
+        // every permutation below must produce a bit-identical e-value,
+        // not merely a numerically close one.
+        let tied_losses = [
+            0.1,
+            0.2,
+            0.3,
+            1e-16,
+            1e-12,
+            1.0 - 1e-16,
+            0.1,
+            0.3,
+            1e-12,
+            0.2,
+        ];
+        let score = 5.0;
+        let scores = vec![score; tied_losses.len()];
+        let g = gamma(0.5);
+
+        let forward = coupled_risk_adjusted_evalues(&losses(&tied_losses), &scores, &[score], g)
+            .unwrap()[0]
+            .get();
+
+        let mut reversed_losses = tied_losses.to_vec();
+        reversed_losses.reverse();
+        let reversed =
+            coupled_risk_adjusted_evalues(&losses(&reversed_losses), &scores, &[score], g).unwrap()
+                [0]
+            .get();
+
+        // A handful of fixed, non-sorted, non-reversed permutations.
+        let permutations: [[usize; 10]; 3] = [
+            [3, 0, 7, 1, 9, 2, 5, 8, 4, 6],
+            [9, 8, 7, 6, 5, 0, 1, 2, 3, 4],
+            [1, 3, 5, 7, 9, 0, 2, 4, 6, 8],
+        ];
+        for permutation in permutations {
+            let permuted_losses: Vec<f64> = permutation.iter().map(|&i| tied_losses[i]).collect();
+            let permuted =
+                coupled_risk_adjusted_evalues(&losses(&permuted_losses), &scores, &[score], g)
+                    .unwrap()[0]
+                    .get();
+            assert_eq!(
+                forward, permuted,
+                "permutation {permutation:?} produced a different (non-bit-exact) e-value"
+            );
+        }
+        assert_eq!(forward, reversed);
+    }
+
+    #[test]
     fn very_small_gamma_stays_finite_or_reports_non_finite_value_cleanly() {
         // gamma just above the smallest positive OpenUnitInterval can
         // represent meaningfully -- either a well-defined finite e-value,
@@ -580,19 +692,27 @@ mod tests {
     // AGENTS.md section 9.3: "permutation invariance of symmetric
     // procedures." A small discrete score alphabet (`-3..3`) makes ties
     // common on purpose, so the same fuzzed property also exercises
-    // "order within a tied group doesn't matter" -- grouping sorts and
-    // aggregates by value before any arithmetic happens, so a tie's
-    // internal input order can never reach the summation.
+    // "order within a tied group doesn't matter" -- `group_scores` sorts
+    // calibration entries by `(score, loss)` (not score alone) before
+    // summing, so a tied group's summation order depends only on its
+    // multiset of loss values, never on input order (see `group_scores`'s
+    // doc comment). The loss alphabet below deliberately includes values
+    // that are not exactly representable in binary and span very
+    // different magnitudes (`0.1`, `1e-16`, `1e-12`), not just the
+    // powers-of-two-friendly `0.25` steps used elsewhere in this crate,
+    // so a summation-order dependency would actually show up as a
+    // mismatch here rather than being masked by exact binary
+    // representability.
     proptest::proptest! {
         #[test]
         fn calibration_and_test_batch_order_is_invariant(
-            raw_calib in proptest::collection::vec((-3i32..3, 0..5usize), 1..8),
+            raw_calib in proptest::collection::vec((-3i32..3, 0..6usize), 1..8),
             raw_test in proptest::collection::vec(-3i32..3, 1..6),
             calib_shuffle_keys in proptest::collection::vec(0i32..1000, 1..8),
             test_shuffle_keys in proptest::collection::vec(0i32..1000, 1..6),
             gamma_num in 1u32..16,
         ) {
-            let discrete = [0.0, 0.25, 0.5, 0.75, 1.0];
+            let discrete = [0.1, 0.2, 0.3, 1e-16, 1e-12, 1.0 - 1e-16];
             let n = raw_calib.len();
             let m = raw_test.len();
             let calib_scores: Vec<f64> = raw_calib.iter().map(|&(s, _)| s as f64).collect();
