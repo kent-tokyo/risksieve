@@ -576,4 +576,107 @@ mod tests {
         .unwrap();
         assert!(result.iter().all(|e| e.get() >= 0.0));
     }
+
+    // AGENTS.md section 9.3: "permutation invariance of symmetric
+    // procedures." A small discrete score alphabet (`-3..3`) makes ties
+    // common on purpose, so the same fuzzed property also exercises
+    // "order within a tied group doesn't matter" -- grouping sorts and
+    // aggregates by value before any arithmetic happens, so a tie's
+    // internal input order can never reach the summation.
+    proptest::proptest! {
+        #[test]
+        fn calibration_and_test_batch_order_is_invariant(
+            raw_calib in proptest::collection::vec((-3i32..3, 0..5usize), 1..8),
+            raw_test in proptest::collection::vec(-3i32..3, 1..6),
+            calib_shuffle_keys in proptest::collection::vec(0i32..1000, 1..8),
+            test_shuffle_keys in proptest::collection::vec(0i32..1000, 1..6),
+            gamma_num in 1u32..16,
+        ) {
+            let discrete = [0.0, 0.25, 0.5, 0.75, 1.0];
+            let n = raw_calib.len();
+            let m = raw_test.len();
+            let calib_scores: Vec<f64> = raw_calib.iter().map(|&(s, _)| s as f64).collect();
+            let calib_losses: Vec<ClosedUnitInterval> = raw_calib
+                .iter()
+                .map(|&(_, li)| ClosedUnitInterval::new("loss", discrete[li]).unwrap())
+                .collect();
+            let test_scores: Vec<f64> = raw_test.iter().map(|&s| s as f64).collect();
+            let g = gamma(gamma_num as f64 / 16.0);
+
+            let original =
+                coupled_risk_adjusted_evalues(&calib_losses, &calib_scores, &test_scores, g).unwrap();
+
+            let mut calib_order: Vec<usize> = (0..n).collect();
+            calib_order.sort_by_key(|&i| calib_shuffle_keys.get(i).copied().unwrap_or(0));
+            let permuted_calib_scores: Vec<f64> =
+                calib_order.iter().map(|&i| calib_scores[i]).collect();
+            let permuted_calib_losses: Vec<ClosedUnitInterval> =
+                calib_order.iter().map(|&i| calib_losses[i]).collect();
+
+            let mut test_order: Vec<usize> = (0..m).collect();
+            test_order.sort_by_key(|&i| test_shuffle_keys.get(i).copied().unwrap_or(0));
+            let permuted_test_scores: Vec<f64> = test_order.iter().map(|&i| test_scores[i]).collect();
+
+            let permuted = coupled_risk_adjusted_evalues(
+                &permuted_calib_losses,
+                &permuted_calib_scores,
+                &permuted_test_scores,
+                g,
+            )
+            .unwrap();
+
+            for (k, &original_index) in test_order.iter().enumerate() {
+                proptest::prop_assert_eq!(original[original_index].get(), permuted[k].get());
+            }
+        }
+
+        #[test]
+        fn evalues_are_non_negative_fuzzed(
+            raw_calib in proptest::collection::vec((-10i32..10, 0..5usize), 1..10),
+            raw_test in proptest::collection::vec(-10i32..10, 0..8),
+            gamma_num in 1u32..16,
+        ) {
+            let discrete = [0.0, 0.25, 0.5, 0.75, 1.0];
+            let calib_scores: Vec<f64> = raw_calib.iter().map(|&(s, _)| s as f64).collect();
+            let calib_losses: Vec<ClosedUnitInterval> = raw_calib
+                .iter()
+                .map(|&(_, li)| ClosedUnitInterval::new("loss", discrete[li]).unwrap())
+                .collect();
+            let test_scores: Vec<f64> = raw_test.iter().map(|&s| s as f64).collect();
+            let g = gamma(gamma_num as f64 / 16.0);
+
+            let result =
+                coupled_risk_adjusted_evalues(&calib_losses, &calib_scores, &test_scores, g).unwrap();
+            proptest::prop_assert!(result.iter().all(|e| e.get() >= 0.0));
+        }
+
+        /// With `m=1`, Equation 5.1's normalizer `1 + sum_{k != j} 1{...}`
+        /// sums over an empty index set (there is no other test point),
+        /// collapsing to the constant `1` for every threshold, and
+        /// `m/(n+1) = 1/(n+1)` -- so Equation 5.1 reduces algebraically to
+        /// exactly Equation 4.1 (see the module docs). Fuzzed here rather
+        /// than only checked on the one hand-derived fixture in
+        /// `coupled_risk_adjusted_evalues`'s own unit tests.
+        #[test]
+        fn single_test_point_matches_equation_4_1_fuzzed(
+            raw_calib in proptest::collection::vec((-20i32..20, 0..5usize), 1..10),
+            test_score_int in -20i32..20,
+            gamma_num in 1u32..16,
+        ) {
+            let discrete = [0.0, 0.25, 0.5, 0.75, 1.0];
+            let calib_scores: Vec<f64> = raw_calib.iter().map(|&(s, _)| s as f64).collect();
+            let calib_losses: Vec<ClosedUnitInterval> = raw_calib
+                .iter()
+                .map(|&(_, li)| ClosedUnitInterval::new("loss", discrete[li]).unwrap())
+                .collect();
+            let test_score = test_score_int as f64;
+            let g = gamma(gamma_num as f64 / 16.0);
+
+            let coupled =
+                coupled_risk_adjusted_evalues(&calib_losses, &calib_scores, &[test_score], g).unwrap();
+            let independent = risk_adjusted_evalue(&calib_losses, &calib_scores, test_score, g).unwrap();
+
+            proptest::prop_assert_eq!(coupled[0].get(), independent.value.get());
+        }
+    }
 }

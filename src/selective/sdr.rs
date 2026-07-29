@@ -345,4 +345,56 @@ mod tests {
         let selected = losses(&[1.0, 0.0, 0.0, 1.0]);
         assert_eq!(realized_selective_risk(&selected), 0.5);
     }
+
+    // AGENTS.md section 9.3: "permutation invariance of symmetric
+    // procedures." The test batch feeding eBH (Theorem 3.3) should select
+    // the same set of *identities*, and the same `tau_hat`, regardless of
+    // the order test points were submitted in -- eBH's own tie-breaking
+    // convention only affects internal sort order, never `tau_hat`'s value
+    // or which values clear the final threshold (`ebh.rs`'s own docs and
+    // property test cover that in isolation; this checks it survives
+    // `certify`'s full batch pipeline, coupled e-value construction
+    // included).
+    proptest::proptest! {
+        #[test]
+        fn coupled_certify_selected_set_is_invariant_to_test_batch_order(
+            raw_calib in proptest::collection::vec((-5i32..5, 0..5usize), 1..8),
+            raw_test in proptest::collection::vec(-5i32..5, 1..8),
+            shuffle_keys in proptest::collection::vec(0i32..1000, 1..8),
+            alpha_num in 1u32..16,
+            gamma_num in 1u32..16,
+        ) {
+            let discrete = [0.0, 0.25, 0.5, 0.75, 1.0];
+            let calib_scores: Vec<f64> = raw_calib.iter().map(|&(s, _)| s as f64).collect();
+            let calib_losses: Vec<ClosedUnitInterval> = raw_calib
+                .iter()
+                .map(|&(_, li)| ClosedUnitInterval::new("loss", discrete[li]).unwrap())
+                .collect();
+            let test_scores: Vec<f64> = raw_test.iter().map(|&s| s as f64).collect();
+            let m = test_scores.len();
+            let alpha = OpenUnitInterval::new("alpha", alpha_num as f64 / 16.0).unwrap();
+            let gamma = OpenUnitInterval::new("gamma", gamma_num as f64 / 16.0).unwrap();
+
+            let original = certify(&calib_losses, &calib_scores, &test_scores, alpha, gamma).unwrap();
+            let mut original_selected: Vec<f64> =
+                original.parameter.iter().map(|&i| test_scores[i]).collect();
+            original_selected.sort_by(f64::total_cmp);
+
+            let mut order: Vec<usize> = (0..m).collect();
+            order.sort_by_key(|&i| shuffle_keys.get(i).copied().unwrap_or(0));
+            let permuted_test_scores: Vec<f64> = order.iter().map(|&i| test_scores[i]).collect();
+
+            let permuted =
+                certify(&calib_losses, &calib_scores, &permuted_test_scores, alpha, gamma).unwrap();
+            let mut permuted_selected: Vec<f64> = permuted
+                .parameter
+                .iter()
+                .map(|&i| permuted_test_scores[i])
+                .collect();
+            permuted_selected.sort_by(f64::total_cmp);
+
+            proptest::prop_assert_eq!(original.diagnostics.ebh_tau_hat, permuted.diagnostics.ebh_tau_hat);
+            proptest::prop_assert_eq!(original_selected, permuted_selected);
+        }
+    }
 }
