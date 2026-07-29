@@ -128,13 +128,16 @@ confirmed numerically, not guessed:**
 - **`ell_bar` clamping.** Equation 5.1's infimum ranges over `l in [0,1]`,
   but `SCoRE_SDR` evaluates its objective at the raw, unclamped
   `ell_bar(t)`, which can exceed `1` (confirmed: `5,142` such events across
-  `50,000` randomized/adversarial trials). This crate clamps `ell_bar(t)`
-  to `[0,1]` before evaluating the objective, matching the equation's
-  stated domain. The same 50,000-trial comparison found **zero** resulting
-  differences in the final e-value or selected set between the clamped
-  and unclamped versions — the divergence exists in the code but was not
-  observed to change any output. The comparison script that produced these
-  numbers is recorded in `THIRD_PARTY_NOTICES.md`.
+  `50,000` randomized/adversarial trials, seed `7`). This crate clamps
+  `ell_bar(t)` to `[0,1]` before evaluating the objective, matching the
+  equation's stated domain. The same 50,000-trial comparison found
+  **zero** resulting differences in the final e-value or selected set
+  between the clamped and unclamped versions — the divergence exists in
+  the code but was not observed to change any output. Reproduce with:
+
+  ```bash
+  python3 scripts/audits/compare_score_reference.py --repo /path/to/Tian-Bai/SCoRE/checkout
+  ```
 - **`gamma`'s domain.** The paper states Theorem 5.1 for any `gamma > 0`
   with no upper bound (Section 5), strictly wider than Equation 4.1's
   `gamma in (0,1)` (Theorem 4.2) — Equation 5.1's normalizer carries an
@@ -161,10 +164,14 @@ confirmed numerically, not guessed:**
   at exactly `l in {0, 1}`, missing the interior breakpoints Equation
   4.1's infimum requires in general (this crate's own
   `risk_adjusted_evalue` sweeps all of them). A 5,000-trial comparison
-  against a from-scratch full breakpoint enumeration found 1,380
-  mismatches (`27.6%`), including cases where `SCoRE_MDR_bf` reports
-  `+inf` for an input whose true value is finite (`~7.05` in the worst
-  case observed). Consequence: this crate's oracle fixture
+  (seed `123`) against a from-scratch full breakpoint enumeration found
+  1,380 mismatches (`27.6%`), including cases where `SCoRE_MDR_bf` reports
+  a badly wrong finite value: the smallest reproducer found (`n=1`,
+  `Lcalib=[0.0538...]`, `Scalib=[-1.6778...]`, `Stest_j=-1.8938...`,
+  `gamma=0.2083...`) has `SCoRE_MDR_bf` report `37.16...` where the true
+  value is `4.80...` — reproduce with the same command as above (the
+  `mdr-bf` comparison runs alongside the `clamp` one by default).
+  Consequence: this crate's oracle fixture
   (`tests/fixtures/score_sdr_v0_1_1.json`) has no independent-construction
   column sourced from `SCoRE_MDR_bf` — `certify_independent`
   /`risk_adjusted_evalue` were already validated in a prior milestone via

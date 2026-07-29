@@ -99,8 +99,9 @@
 //! An empirical comparison across 50,000 randomized and adversarial
 //! (tie-heavy, extreme-`gamma`) trials against the unclamped `SCoRE_SDR`
 //! found 5,142 cases where `ell_bar(t) > 1` for some candidate, and zero
-//! resulting differences in the final e-value or selected set -- see
-//! `THIRD_PARTY_NOTICES.md` for the comparison script. This is not a proof
+//! resulting differences in the final e-value or selected set --
+//! reproducible via `scripts/audits/compare_score_reference.py` (see
+//! `docs/references.md` and `THIRD_PARTY_NOTICES.md`). This is not a proof
 //! that the two are always identical, only evidence that the divergence,
 //! where it exists, has not been observed to change any output; this
 //! module implements the mathematically-justified (clamped) version

@@ -44,13 +44,16 @@
   blob SHA, license, and copyright above, plus the generator seed
   (`20260729`) and generation date. `tests/score_sdr_oracle.rs` reads only
   this committed JSON; Python is never invoked by `cargo test` or CI.
-- **Comparison script not committed:** the ad hoc script that ran the
-  50,000-trial `ell_bar`-clamping comparison and the 5,000-trial
-  `SCoRE_MDR_bf` completeness check (both cited in
-  `docs/references.md`) was a throwaway analysis script, not committed to
-  this repository; the trial counts, seeds, and findings it produced are
-  recorded in `docs/references.md` and in this file so the claims remain
-  auditable even without the script itself.
+- **Comparison script:** `scripts/audits/compare_score_reference.py`
+  reproduces both the `ell_bar`-clamping comparison and the `SCoRE_MDR_bf`
+  completeness check cited in `docs/references.md` against a verified
+  checkout (same provenance check as the fixture generator, via
+  `scripts/score_provenance.py`), with fixed default seeds (`7` and `123`
+  respectively) matching the numbers recorded there. Run it with:
+
+  ```bash
+  python3 scripts/audits/compare_score_reference.py --repo /path/to/Tian-Bai/SCoRE/checkout
+  ```
 
 ## Historical note
 
