@@ -185,8 +185,9 @@ account). Three arms share one replication loop: `weighted`
 (`certify_weighted` with the true weights, `KnownDensityRatio`), `naive`
 (the same shifted test point through plain unweighted `certify` — the
 wrong thing to do, included specifically to prove the DGP is not
-vacuous), and `control` (a fully re-drawn no-shift replication, weight
-`1`). At `alpha = gamma = 0.3`, seed `20260730`: at 500 repetitions
+vacuous), and `control` (shares the unshifted score coordinate with the
+other two arms, re-draws the risk coordinate from `P` instead of `Q`,
+weight `1`). At `alpha = gamma = 0.3`, seed `20260730`: at 500 repetitions
 (half-width `0.0607`), `weighted` mean `0.2120`, `control` mean `0.2900`,
 `naive` mean `0.3880`; at 20,000 repetitions (half-width `0.0096`),
 `weighted` mean `0.22485`, `control` mean `0.28780`, `naive` mean

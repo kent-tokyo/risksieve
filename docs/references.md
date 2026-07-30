@@ -214,14 +214,21 @@ crate's Rust code and of the official package, since neither could serve
 as a ground truth for the e-value itself); and `official_selected_indices`,
 checked against the actual `SCoRE_MDR_w` shortcut, but only for cases with
 `gamma <= alpha` — its documented, unconditionally-valid regime. All 35
-fixture cases (`tests/score_mdr_w_oracle.rs`) pass both comparisons,
-including a `+infinity` case (zero calibration weight, zero test weight
-combined with zero weighted loss) where the reference implementation,
-`SCoRE_MDR_w`'s shortcut, and this crate's `weighted_risk_adjusted_evalue`
-all independently agree the point should deploy. No formula discrepancy
-was found between this crate's construction and either comparison target
-— unlike Equation 5.1 (see the audit above), this audit did not surface a
-difference requiring documentation and a judgment call.
+fixture cases (106 test points total, `tests/score_mdr_w_oracle.rs`) match
+`reference_evalues`, including a `+infinity` case (zero calibration
+weight, zero test weight combined with zero weighted loss) where the
+reference implementation, `SCoRE_MDR_w`'s shortcut, and this crate's
+`weighted_risk_adjusted_evalue` all independently agree the point should
+deploy. 34 of the 35 cases (104 of the 106 test points) also have
+`gamma <= alpha` and so are additionally checked against
+`official_selected_indices`, matching exactly; the remaining case
+(`gamma_greater_than_alpha_not_compared`, added specifically to exercise
+this branch) has `gamma > alpha` and so has no decision comparison at
+all, by design — not a case that was checked and happened to pass. No
+formula discrepancy was found between this crate's construction and
+either comparison target — unlike Equation 5.1 (see the audit above),
+this audit did not surface a difference requiring documentation and a
+judgment call.
 
 **`gamma`'s domain.** Theorem 6.2 states the same `gamma in (0,1)` domain
 as the unweighted Theorem 4.2 (unlike Theorem 5.1's SDR extension, which

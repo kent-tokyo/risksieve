@@ -40,8 +40,9 @@
 //!   with every weight `1`), which is the wrong thing to do under shift.
 //!   This arm is expected to *exceed* `alpha` -- its purpose is to prove
 //!   the DGP is not vacuous, not to check a guarantee this crate makes.
-//! - `control`: a fully re-drawn no-shift replication (`X2 ~ P` for the
-//!   test point too), weights `1`, `certify_weighted` with
+//! - `control`: shares the unshifted score coordinate `X1` with the other
+//!   two arms, but re-draws the risk coordinate from `P` instead of `Q`
+//!   (`X2 ~ Uniform(0,1)`), weights `1`, `certify_weighted` with
 //!   `KnownDensityRatio`. Sanity check that nothing breaks, and that the
 //!   bound holds just as comfortably, when there is in fact no shift.
 //!

@@ -352,7 +352,11 @@ All notable changes to `risksieve` are documented here. Format follows
   `docs/references.md`'s "Equation 6.1 audit" for the full correspondence;
   no formula discrepancy was found against either comparison target.
 - `tests/score_mdr_w_oracle.rs`: reads the fixture above (Python is never
-  invoked by `cargo test`); all 35 cases pass both comparisons.
+  invoked by `cargo test`); all 35 cases (106 test points) match the
+  reference e-values, and the 34 of 35 cases (104 of 106 test points)
+  with `gamma <= alpha` also match the official decision exactly — the
+  remaining case has `gamma > alpha` by design and so has no decision
+  comparison at all.
 - Documented (and covered by a regression test,
   `certificate_serde_round_trip_does_not_preserve_positive_infinity`) a
   narrow, pre-existing `serde` limitation surfaced by `EValue`: `serde_json`
