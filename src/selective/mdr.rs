@@ -372,6 +372,24 @@ mod tests {
         assert!(certificate.parameter);
     }
 
+    /// Regression: retyping `Diagnostics::risk_adjusted_evalue` from
+    /// `Option<f64>` to `Option<EValue>` (to make weighted MDR's
+    /// `+infinity` case serde-safe) must not break the unweighted
+    /// `certify` path, which always produces `EValue::Finite`.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn unweighted_certificate_serde_round_trip_is_unaffected() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+        let certificate = certify(&losses(&[0.0]), &[1.0], 0.0, alpha, alpha).unwrap();
+        assert_eq!(
+            certificate.diagnostics.risk_adjusted_evalue,
+            Some(finite(2.0))
+        );
+        let json = serde_json::to_string(&certificate).unwrap();
+        let restored: RiskCertificate<bool> = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, certificate);
+    }
+
     #[test]
     fn no_feasible_threshold_is_recorded_as_uninformative() {
         let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
