@@ -393,6 +393,19 @@ All notable changes to `risksieve` are documented here. Format follows
   verification. See `docs/references.md`'s "Equation 6.1 audit" for the
   full correspondence; no formula discrepancy was found against either
   comparison target.
+- `scripts/audits/compare_score_mdr_w.py`: makes the 300,000-trial search
+  above independently reproducible (fixed seed `20260730`, CLI-configurable
+  trial count), rather than resting on an uncommitted one-off search.
+  Tallies `gamma > alpha` trials, how many have the official shortcut's
+  naive (pre-overlap-check) decision as "deploy", and how many of those
+  the overlap condition flips to "abstain" -- descriptive counts only, not
+  part of the pass/fail verdict, which is the official-vs-reference
+  decision mismatch count (must be zero). Follows the same pattern as
+  `scripts/audits/compare_score_reference.py`: reuses
+  `scripts/score_provenance.py`'s fail-fast checkout verification, and
+  exits non-zero on any mismatch, printing the first full reproducer
+  (inputs, both decisions, the reference e-value) if one is found. Not
+  part of `cargo test` or CI.
 - `tests/score_mdr_w_oracle.rs`: reads the fixture above (Python is never
   invoked by `cargo test`); all 38 cases (109 test points) match the
   reference e-values, and every case's official decision matches exactly.

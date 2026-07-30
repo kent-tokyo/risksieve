@@ -130,6 +130,33 @@ gammaとalphaの大小に関わらず全ケースで厳密一致を検証して�
 (`tests/statistical_validity_weighted_mdr.rs`)で検証している。weighted
 SDR は見送った(`docs/roadmap.md` 参照)。
 
+その後のレビューラウンドで、この Milestone の数値まわりをさらに堅牢化
+した。`WeightAccumulator::update`(`AnytimeShiftedController`が使用)は
+`Result`を返すようになり、重みの二乗・累積和・二乗和・実効サンプル
+サイズのいずれかが非有限へオーバーフローする更新を拒否する。かつ
+完全にトランザクショナルである——候補値をすべてローカルで計算してから
+コミットするため、拒否された更新がaccumulatorを部分的に変更することは
+ない。`AnytimeShiftedController::update`自体も端から端までトランザク
+ショナルになった(重みの蓄積・損失評価・派生する補正項`gamma_n`のすべて
+をローカル候補として計算してから`self`へコミットする)。オーバーフロー
+時は`gamma_n`が`inf`/`NaN`の証明書を返すことは決してなく、代わりに
+`RiskSieveError::NumericalOverflow`で更新自体を拒否する。一方
+`certify_weighted`のcalibration weight診断は、決して失敗しない別の
+scale-safeなヘルパー`shift::importance::WeightSummary`を使う——
+`weighted_risk_adjusted_evalue`自体は既に共有最大値で正規化して厳密な
+まま保たれるため、`weight_sum`/`weight_sum_of_squares`の診断のみの
+オーバーフローが呼び出し自体をブロックしてはならない(anytime
+controllerの保証計算そのものを担うaccumulatorのオーバーフローとは
+事情が異なる)。新設の
+`Diagnostics::weight_sum_overflowed`/`weight_sum_of_squares_overflowed`
+フィールドがこの区別を明示する(`Some(true)`は該当フィールドが
+「未計算」ではなく「オーバーフローしたから」`None`であることを示す)
+——`risk_adjusted_evalue`に対する`EValue`と同種のserde安全性の修正で
+ある。上記の30万試行`gamma > alpha`監査は
+`scripts/audits/compare_score_mdr_w.py --repo /path/to/Tian-Bai/SCoRE`
+により第三者が再現可能になった。正確なコマンドと再現された件数は
+`docs/references.md`の「Equation 6.1 audit」を参照。
+
 実装の全体シーケンスは `AGENTS.md` の第7章、現時点でのテスト範囲は
 `docs/validation.md` を参照。
 

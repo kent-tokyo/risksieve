@@ -89,10 +89,24 @@ pub enum RiskSieveError {
     #[error("no feasible parameter satisfies the requested risk target")]
     NoFeasibleParameter,
 
-    /// An internal numerical routine failed, for example due to overflow.
+    /// An internal numerical routine failed to converge or found its own
+    /// invariant violated, for example a bounded search exceeding its cap.
     #[error("numerical failure during `{operation}`")]
     NumericalFailure {
         /// Name of the routine that failed.
+        operation: &'static str,
+    },
+
+    /// An accumulated quantity (a weight, a sum, a derived correction
+    /// term) would have become non-finite from finite inputs. Distinct
+    /// from [`RiskSieveError::NumericalFailure`] (a search or invariant
+    /// check that failed) -- this specifically means an arithmetic
+    /// operation overflowed, so a caller might reasonably respond by
+    /// rescaling their inputs rather than treating it as an algorithmic
+    /// limitation.
+    #[error("numerical overflow during `{operation}`")]
+    NumericalOverflow {
+        /// Name of the operation that overflowed.
         operation: &'static str,
     },
 }

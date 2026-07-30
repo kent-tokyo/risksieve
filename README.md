@@ -144,6 +144,34 @@ simulation of the weighted MDR guarantee
 (`tests/statistical_validity_weighted_mdr.rs`). Weighted SDR is deferred;
 see `docs/roadmap.md`.
 
+A follow-up review pass hardened this milestone's numerics further.
+`WeightAccumulator::update` (used by `AnytimeShiftedController`) now
+returns a `Result`, rejecting an update whose weight-squared, running
+sum, running sum of squares, or effective sample size would overflow to
+non-finite, and is fully transactional: every candidate value is computed
+into a local first, so a rejected update never partially mutates the
+accumulator. `AnytimeShiftedController::update` itself is now
+transactional end to end (weight accumulation, loss evaluation, and the
+derived `gamma_n` correction term all compute against local candidates
+before anything is committed to `self`), and rejects the update outright
+with `RiskSieveError::NumericalOverflow` rather than ever returning a
+certificate whose `gamma_n` is `inf`/`NaN`. `certify_weighted`'s
+calibration weight diagnostics, by contrast, use a separate,
+never-failing `shift::importance::WeightSummary` helper: since
+`weighted_risk_adjusted_evalue` already normalizes by the shared maximum
+weight and stays exact regardless, a diagnostic-only overflow in
+`weight_sum`/`weight_sum_of_squares` must not block the call the way an
+overflow in the anytime controller's guarantee-bearing accumulator does.
+New `Diagnostics::weight_sum_overflowed`/`weight_sum_of_squares_overflowed`
+fields make that distinction explicit (`Some(true)` when the
+corresponding field is `None` *because it overflowed*, not because it
+was never computed) — the same class of serde-safety fix `EValue` exists
+for `risk_adjusted_evalue`. The 300,000-trial `gamma > alpha` audit cited
+above is reproducible by a third party via
+`scripts/audits/compare_score_mdr_w.py --repo /path/to/Tian-Bai/SCoRE`;
+see `docs/references.md`'s "Equation 6.1 audit" for the exact command and
+reproduced counts.
+
 See `AGENTS.md` section 7 for the full implementation sequence and
 `docs/validation.md` for what is and is not tested yet.
 

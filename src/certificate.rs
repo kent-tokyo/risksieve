@@ -153,6 +153,18 @@ pub struct Diagnostics {
     /// `gamma` and `ebh_tau_hat` are recorded for). `None` for every
     /// other controller, which has no separate test-point weight.
     pub test_weight: Option<f64>,
+    /// Whether `weight_sum` overflowed to non-finite at raw scale rather
+    /// than simply not being computed for this controller -- `None`
+    /// means "not applicable here" (no importance weights at all), while
+    /// `Some(true)` means `weight_sum` is `None` *because it
+    /// overflowed*. Populated by `selective::mdr::certify_weighted` (via
+    /// `shift::importance::WeightSummary`, which never fails a call over
+    /// this) and `anytime::shifted::AnytimeShiftedController` (which
+    /// instead rejects the update outright on overflow, so this is
+    /// always `Some(false)` whenever it returns a certificate at all).
+    pub weight_sum_overflowed: Option<bool>,
+    /// Same as `weight_sum_overflowed`, for `weight_sum_of_squares`.
+    pub weight_sum_of_squares_overflowed: Option<bool>,
 }
 
 /// The output of every `risksieve` controller: a parameter together with

@@ -141,9 +141,13 @@ pub enum WeightConsistencyEvidence {
 
 /// Evidence that Bai and Jin (2026) Theorem 6.4's function
 /// `F(t) = E_P[w(X)*l(X)*1{s(X)<=t}] / E_P[w(X)]` is continuous and
-/// strictly increasing at `t* = sup{t : F(t) <= gamma}`, the theorem's
-/// other hypothesis beyond weight consistency and independent training
-/// data.
+/// strictly increasing at `t* = sup{t : F(t) <= alpha}` -- the target
+/// risk level, not `gamma` -- the theorem's other hypothesis beyond
+/// weight consistency and independent training data. `gamma == alpha` is
+/// a separate, additional hypothesis of the same theorem (see
+/// [`ImportanceWeightSource::Estimated`]'s docs): if `t*` were already
+/// defined in terms of `gamma`, requiring `gamma == alpha` on top of it
+/// would be redundant rather than a genuinely separate condition.
 ///
 /// Like [`WeightConsistencyEvidence`], this is a population-level
 /// regularity condition on an unknown function, not something this crate

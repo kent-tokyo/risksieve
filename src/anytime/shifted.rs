@@ -172,8 +172,8 @@ impl<L, Parameter> AnytimeShiftedControllerBuilder<L, Parameter> {
     /// Declares whether the importance weights supplied to `update` are a
     /// known density ratio or an estimate — never defaulted, since it
     /// determines whether the resulting certificate can claim
-    /// [`GuaranteeKind::AnytimeHighProbability`] or only
-    /// [`GuaranteeKind::Asymptotic`].
+    /// [`GuaranteeKind::AnytimeHighProbability`] or is downgraded to only
+    /// [`GuaranteeKind::EmpiricalOnly`].
     pub fn weight_source(mut self, source: ImportanceWeightSource) -> Self {
         self.weight_source = Some(source);
         self
@@ -303,8 +303,12 @@ impl<L, Parameter: Clone + PartialOrd> AnytimeShiftedController<L, Parameter> {
     /// [`ImportanceWeightSource::KnownDensityRatio`]:  with probability at
     /// least `1 - delta`, every certificate this controller has ever
     /// returned satisfies `E_{P*}[loss] <= alpha`.
-    /// [`GuaranteeKind::Asymptotic`] when weights are
-    /// [`ImportanceWeightSource::Estimated`] instead.
+    /// [`GuaranteeKind::EmpiricalOnly`] when weights are
+    /// [`ImportanceWeightSource::Estimated`] instead: Theorem 4.7 has no
+    /// asymptotic argument for estimated weights at all (see the module
+    /// docs), so this downgrade is unconditional, unlike
+    /// [`crate::selective::mdr::certify_weighted`]'s Theorem-6.4-gated
+    /// one.
     ///
     /// # Errors
     ///
@@ -315,6 +319,11 @@ impl<L, Parameter: Clone + PartialOrd> AnytimeShiftedController<L, Parameter> {
     ///   negative, `NaN`, or infinite.
     /// - [`RiskSieveError::DegenerateWeights`] if every weight folded in
     ///   so far (including this one) is exactly zero.
+    /// - [`RiskSieveError::NumericalOverflow`] if this weight, combined
+    ///   with those already folded in, would make the accumulated weight
+    ///   sum, sum of squares, or the derived correction term `gamma_n`
+    ///   non-finite. The controller's state is left completely unchanged
+    ///   when this happens -- a caller can retry with a rescaled weight.
     /// - [`RiskSieveError::NoFeasibleParameter`] if `m*` has been reached
     ///   but no candidate in the grid meets the corrected target.
     ///
@@ -373,31 +382,61 @@ impl<L, Parameter: Clone + PartialOrd> AnytimeShiftedController<L, Parameter> {
             }
         })?;
 
-        self.n += 1;
-        self.weights.update(validated_weight);
-        self.weights.ensure_not_degenerate()?;
+        // Every fallible step below operates on a local candidate first
+        // -- `self` is only mutated once every one of them has already
+        // succeeded, at the "Commit" point near the end. This makes a
+        // rejected update (degenerate weights, weight overflow, a
+        // failing loss evaluation, or no feasible candidate) leave the
+        // controller exactly as it was, so a caller can safely retry
+        // with different input rather than having to first recover from
+        // a partially-applied one.
+        let mut candidate_weights = self.weights;
+        candidate_weights.update(validated_weight)?;
+        candidate_weights.ensure_not_degenerate()?;
 
+        let mut candidate_cumulative_loss = self.cumulative_loss.clone();
         for (index, candidate) in self.candidates.iter().enumerate() {
-            self.cumulative_loss[index] += self.loss.evaluate_checked(observation, candidate)?;
+            candidate_cumulative_loss[index] +=
+                self.loss.evaluate_checked(observation, candidate)?;
         }
 
-        let weight_sum = self.weights.sum();
-        let weight_sum_of_squares = self.weights.sum_of_squares();
-        let n = self.n as f64;
+        let candidate_n = self.n + 1;
+        let weight_sum = candidate_weights.sum();
+        let weight_sum_of_squares = candidate_weights.sum_of_squares();
+        let n = candidate_n as f64;
 
         // `m_reference` stands in for the not-yet-frozen `m*` while
         // searching (using the current step as its own tentative
         // reference); once frozen it is the fixed value every later step
         // reuses. The two coincide exactly at the step `m*` freezes, so
         // `gamma_n` is correct in both cases without recomputation.
-        let m_reference = self.m_star.unwrap_or(self.n);
+        let m_reference = self.m_star.unwrap_or(candidate_n);
         let bias = self.b * (1.0 - weight_sum / n);
         let v = self.b * self.b * weight_sum_of_squares;
-        let gamma_n = bias + boundary::weighted_term(m_reference, self.delta.get(), v) / n;
-
-        if self.m_star.is_none() && gamma_n <= self.alpha.get() {
-            self.m_star = Some(self.n);
+        if !v.is_finite() {
+            return Err(RiskSieveError::NumericalOverflow {
+                operation: "AnytimeShiftedController::update: b^2 * weight_sum_of_squares overflowed",
+            });
         }
+        let gamma_n = bias + boundary::weighted_term(m_reference, self.delta.get(), v) / n;
+        if !gamma_n.is_finite() {
+            // `weight_sum`/`weight_sum_of_squares` are already guaranteed
+            // finite by `candidate_weights.update` above, and `v` was
+            // just checked, but Theorem 4.7's correction term feeds
+            // through one more boundary-function call -- this is the
+            // guarantee-bearing quantity itself, so it must never reach
+            // a certificate as `inf`/`NaN` regardless of which upstream
+            // term caused it.
+            return Err(RiskSieveError::NumericalOverflow {
+                operation: "AnytimeShiftedController::update: gamma_n overflowed",
+            });
+        }
+
+        let candidate_m_star = if self.m_star.is_none() && gamma_n <= self.alpha.get() {
+            Some(candidate_n)
+        } else {
+            self.m_star
+        };
 
         let corrected_target = self.alpha.get() - gamma_n;
         let last_index = self.candidates.len() - 1;
@@ -410,30 +449,29 @@ impl<L, Parameter: Clone + PartialOrd> AnytimeShiftedController<L, Parameter> {
             // designated uninformative fallback applies.
             last_index
         } else {
-            let mut found = None;
-            for index in 0..self.candidates.len() {
-                if self.cumulative_loss[index] / n <= corrected_target {
-                    found = Some(index);
-                    break;
-                }
-            }
-            found.ok_or(RiskSieveError::NoFeasibleParameter)?
+            candidate_cumulative_loss
+                .iter()
+                .position(|&loss| loss / n <= corrected_target)
+                .ok_or(RiskSieveError::NoFeasibleParameter)?
         };
 
         // "The threshold sequence will be non-increasing and, when
         // necessary, we use a running minimum" (Theorem 4.1's
         // Introduction; the module docs explain why this still holds
         // here).
-        let overridden = match self.best_index {
-            Some(best) if raw_index > best => true,
-            _ => {
-                self.best_index = Some(raw_index);
-                false
-            }
+        let (candidate_best_index, overridden) = match self.best_index {
+            Some(best) if raw_index > best => (best, true),
+            _ => (raw_index, false),
         };
-        let deployed_index = self
-            .best_index
-            .expect("set immediately above on first update");
+        let deployed_index = candidate_best_index;
+
+        // Commit: every fallible step above has already succeeded, so
+        // this is the only place `self` is mutated.
+        self.n = candidate_n;
+        self.weights = candidate_weights;
+        self.cumulative_loss = candidate_cumulative_loss;
+        self.m_star = candidate_m_star;
+        self.best_index = Some(candidate_best_index);
 
         let guarantee = match &self.weight_source {
             ImportanceWeightSource::KnownDensityRatio => GuaranteeKind::AnytimeHighProbability,
@@ -452,6 +490,12 @@ impl<L, Parameter: Clone + PartialOrd> AnytimeShiftedController<L, Parameter> {
             weight_range: self.weights.range(),
             weight_sum: Some(weight_sum),
             weight_sum_of_squares: Some(weight_sum_of_squares),
+            // Always `Some(false)`: unlike `selective::mdr::certify_weighted`,
+            // an overflow here rejects the update outright above rather
+            // than returning a certificate with a degraded diagnostic,
+            // so reaching this point already proves neither overflowed.
+            weight_sum_overflowed: Some(false),
+            weight_sum_of_squares_overflowed: Some(false),
             uninformative_result: Some(deployed_index == last_index),
             running_minimum_applied: Some(overridden),
             ..Default::default()
@@ -607,6 +651,62 @@ mod tests {
         assert_eq!(certificate.diagnostics.weight_sum, Some(3.0));
         assert_eq!(certificate.diagnostics.weight_sum_of_squares, Some(5.0));
         assert_eq!(certificate.diagnostics.weight_range, Some((1.0, 2.0)));
+    }
+
+    #[test]
+    fn overflow_error_leaves_controller_state_unchanged_and_recoverable() {
+        let mut controller = small_controller();
+        controller.update(&0.05, 1.0).unwrap();
+        let before = (
+            controller.n,
+            controller.weights,
+            controller.cumulative_loss.clone(),
+            controller.best_index,
+            controller.m_star,
+        );
+
+        // A single f64::MAX weight overflows WeightAccumulator's own
+        // weight-squared check; this must reject the update outright
+        // rather than returning a certificate with a non-finite
+        // gamma_n, and must not touch the controller's state at all.
+        let err = controller.update(&0.05, f64::MAX).unwrap_err();
+        assert!(matches!(err, RiskSieveError::NumericalOverflow { .. }));
+
+        let after = (
+            controller.n,
+            controller.weights,
+            controller.cumulative_loss.clone(),
+            controller.best_index,
+            controller.m_star,
+        );
+        assert_eq!(before, after, "a rejected update must not mutate state");
+
+        // A subsequent, ordinary weight still works exactly as if the
+        // failed attempt had never happened.
+        let certificate = controller.update(&0.05, 3.0).unwrap();
+        assert_eq!(certificate.diagnostics.weight_sum, Some(4.0));
+    }
+
+    #[test]
+    fn known_density_ratio_certificate_has_no_non_finite_diagnostics() {
+        let mut controller = small_controller();
+        controller.update(&0.05, 1.0).unwrap();
+        let certificate = controller.update(&0.05, 2.0).unwrap();
+        assert!(certificate.diagnostics.empirical_risk.unwrap().is_finite());
+        assert!(certificate.diagnostics.correction_term.unwrap().is_finite());
+        assert!(certificate.diagnostics.weight_sum.unwrap().is_finite());
+        assert!(
+            certificate
+                .diagnostics
+                .weight_sum_of_squares
+                .unwrap()
+                .is_finite()
+        );
+        assert_eq!(certificate.diagnostics.weight_sum_overflowed, Some(false));
+        assert_eq!(
+            certificate.diagnostics.weight_sum_of_squares_overflowed,
+            Some(false)
+        );
     }
 
     #[test]

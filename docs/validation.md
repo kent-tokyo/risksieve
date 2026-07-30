@@ -244,8 +244,8 @@ reference implementation that building those cases surfaced (fixed with
 the same `feasibility_epsilon` tolerance pattern the Rust code already
 uses).
 
-Tier 6 (regressions) has six entries so far, all found while building
-weighted MDR:
+Tier 6 (regressions) has ten entries so far, all found while building or
+reviewing weighted MDR:
 
 1. `risk_adjusted_evalue` (`src/selective/evalue.rs`, Equation 4.1)
    grouped tied calibration scores via a sort keyed on score alone,
@@ -313,8 +313,62 @@ weighted MDR:
    tolerance) or the official package. Fixed with the identical
    `feasibility_epsilon` pattern; a 300,000-trial re-check found zero
    further mismatches. See `docs/references.md`'s "Equation 6.1 audit".
+7. `certify_weighted`'s calibration weight diagnostics (`weight_sum`,
+   `weight_sum_of_squares`, `effective_sample_size`) were computed at raw
+   scale via `WeightAccumulator`, so they could themselves overflow to
+   non-finite even though the e-value stays exact (it normalizes
+   independently) — and `serde_json` serializes `f64::INFINITY` as
+   `null`, the identical silent-data-loss failure `EValue` exists to
+   prevent for `risk_adjusted_evalue`. Fixed by a new, never-failing
+   `shift::importance::WeightSummary` helper (normalizes by the shared
+   maximum weight, reports the raw-scale value only when it is itself
+   representable) plus new `Diagnostics::weight_sum_overflowed`/
+   `weight_sum_of_squares_overflowed` flags that make the distinction
+   explicit; see the `weight_summary_*` tests in
+   `src/shift/importance.rs` and
+   `weighted_raw_scale_weight_diagnostics_overflow_is_explicit_not_silent`/
+   `weight_sum_overflow_and_not_computed_remain_distinct_after_serde_round_trip`
+   in `src/selective/mdr.rs`.
+8. `WeightAccumulator::update` (used directly by
+   `anytime::AnytimeShiftedController`, unlike the diagnostic-only helper
+   above) computed its candidate sum/sum of squares/effective sample size
+   without checking for overflow, and `AnytimeShiftedController::update`
+   fed them straight into Theorem 4.7's correction term `gamma_n` — a
+   huge-but-finite weight could therefore produce a certificate whose
+   `gamma_n` is non-finite, corrupting the guarantee computation itself,
+   not merely a diagnostic. Restructuring `update` to be fully
+   transactional (every fallible step -- weight accumulation, loss
+   evaluation, the derived correction term -- computes against a local
+   candidate before anything commits to `self`) also fixed a pre-existing,
+   unrelated bug found in the process: on a rejected update (for example
+   `DegenerateWeights`), `self.n` and `self.weights` had already been
+   mutated before the error was returned, so a caller retrying after
+   fixing their input was silently building on the failed attempt's
+   partial state. See `update_rejects_a_weight_whose_square_overflows` and
+   `update_rejects_a_sum_that_overflows_independently_of_the_square_check`
+   in `src/shift/importance.rs`, and
+   `overflow_error_leaves_controller_state_unchanged_and_recoverable` in
+   `src/anytime/shifted.rs`.
+9. `guarantee::ThresholdRegularityEvidence`'s doc comment stated Theorem
+   6.4's threshold as `t* = sup{t : F(t) <= gamma}`; the paper defines it
+   in terms of `alpha`, the target risk level, with `gamma == alpha`
+   checked as a separate, additional hypothesis of the same theorem (if
+   `t*` were already defined via `gamma`, that separate check would be
+   redundant). Fixed the formula in `src/guarantee.rs`.
+10. The `gamma > alpha` audit's own overlap-condition-flip count
+    (`50,983`, cited in `docs/references.md`) came from a one-off,
+    now-deleted search script and was not independently reproducible.
+    Superseded by
+    `scripts/audits/compare_score_mdr_w.py`, a permanent, CLI-configurable
+    script (default seed `20260730`, default `300000` trials) that
+    reproduces the same zero-mismatch result under its own sampling
+    scheme -- `26805` overlap-condition flips at the default seed and
+    trial count, a different but not contradictory count from a
+    different random sequence over the same design, not a regression in
+    coverage. See `docs/references.md`'s "Equation 6.1 audit" for the
+    exact reproduction command and counts.
 
-See `CHANGELOG.md`'s `Fixed` section for all six. Each remaining tier or
+See `CHANGELOG.md`'s `Fixed` section for all ten. Each remaining tier or
 per-milestone gap activates as the work in `docs/roadmap.md` that needs it
 lands; this file will list the actual test names and fixture locations as
 they are added, rather than describing them abstractly.

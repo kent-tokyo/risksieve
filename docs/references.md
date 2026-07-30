@@ -237,14 +237,25 @@ things:
 
 - A 300,000-trial randomized search (fixed seed) comparing this crate's
   decision (via the from-scratch reference below) against the official
-  decision found **zero mismatches**, including 50,983 `gamma > alpha`
-  trials where the shortcut's overlap condition actually changed its
-  naive (pre-overlap-check) decision. Two of those trials became fixed
-  fixture cases: `gamma_greater_than_alpha_overlap_condition_flips_to_abstain`
+  decision found **zero mismatches**, including tens of thousands of
+  `gamma > alpha` trials where the shortcut's overlap condition actually
+  changed its naive (pre-overlap-check) decision. Two of those trials
+  became fixed fixture cases: `gamma_greater_than_alpha_overlap_condition_flips_to_abstain`
   (naive says deploy, overlap condition correctly flips to abstain) and
   `gamma_greater_than_alpha_overlap_condition_does_not_flip` (naive says
   deploy, overlap condition confirms it). The randomized cases were also
-  widened to sample `gamma` up to `2.5x alpha`, not only `<= alpha`.
+  widened to sample `gamma` up to `2.5x alpha`, not only `<= alpha`. This
+  search is reproducible by a third party, not just asserted here:
+
+  ```bash
+  python3 scripts/audits/compare_score_mdr_w.py --repo /path/to/Tian-Bai/SCoRE
+  ```
+
+  (default seed `20260730`, default `300000` trials.) At that seed and
+  trial count: `66231` trials have `gamma > alpha`; of those, `42018`
+  have a naive (pre-overlap-check) decision of "deploy"; of *those*,
+  `26805` are flipped to "abstain" by the overlap condition; and the
+  official-vs-reference mismatch count is `0`.
 - Building those targeted cases surfaced a genuine bug in this fixture
   generator's own reference implementation, not in this crate — see
   "A floating-point boundary bug in the reference implementation" below.

@@ -131,7 +131,7 @@ use crate::guarantee::{
 use crate::probability::{ClosedInterval, ClosedUnitInterval, NonNegative, OpenUnitInterval};
 use crate::selective::evalue::risk_adjusted_evalue;
 use crate::selective::evalue_weighted::weighted_risk_adjusted_evalue;
-use crate::shift::importance::WeightAccumulator;
+use crate::shift::importance::WeightSummary;
 
 /// Runs Algorithm 1 (SCoRE-MDR) for one test point and returns its
 /// deployment-decision certificate.
@@ -301,10 +301,12 @@ pub fn certify_weighted(
         shift: ShiftAssumption::CovariateShift { weight_source },
     };
 
-    let mut weight_stats = WeightAccumulator::new();
-    for &w in calibration_weights {
-        weight_stats.update(w);
-    }
+    // A scale-safe summary, not `WeightAccumulator`: the actual e-value
+    // above already normalizes by the shared maximum weight and stays
+    // exact regardless, so a diagnostic-only overflow here must not fail
+    // the whole call the way `WeightAccumulator::update` deliberately
+    // does for `AnytimeShiftedController` (see the module docs).
+    let weight_summary = WeightSummary::compute(calibration_weights);
 
     Ok(RiskCertificate {
         parameter: deploy,
@@ -317,10 +319,12 @@ pub fn certify_weighted(
             risk_adjusted_evalue: Some(outcome.value),
             gamma: Some(gamma.get()),
             uninformative_result: Some(!outcome.feasible_threshold_found),
-            weight_sum: Some(weight_stats.sum()),
-            weight_sum_of_squares: Some(weight_stats.sum_of_squares()),
-            effective_sample_size: Some(weight_stats.effective_sample_size()),
-            weight_range: weight_stats.range(),
+            weight_sum: weight_summary.sum,
+            weight_sum_of_squares: weight_summary.sum_of_squares,
+            weight_sum_overflowed: Some(weight_summary.sum_overflowed),
+            weight_sum_of_squares_overflowed: Some(weight_summary.sum_of_squares_overflowed),
+            effective_sample_size: Some(weight_summary.effective_sample_size),
+            weight_range: weight_summary.range,
             test_weight: Some(test_weight.get()),
             ..Default::default()
         },
@@ -727,6 +731,159 @@ mod tests {
         assert_eq!(certificate.diagnostics.weight_sum_of_squares, Some(10.0));
         assert_eq!(certificate.diagnostics.weight_range, Some((1.0, 3.0)));
         assert_eq!(certificate.diagnostics.test_weight, Some(5.0));
+        assert_eq!(certificate.diagnostics.weight_sum_overflowed, Some(false));
+        assert_eq!(
+            certificate.diagnostics.weight_sum_of_squares_overflowed,
+            Some(false)
+        );
+    }
+
+    /// A raw-scale overflow in the calibration weight diagnostics must
+    /// never block `certify_weighted` itself: `risk_adjusted_evalue` is
+    /// computed independently, via its own normalization, and stays
+    /// exact regardless of what these diagnostics can represent.
+    #[test]
+    fn weighted_raw_scale_weight_diagnostics_overflow_is_explicit_not_silent() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+        let certificate = certify_weighted(
+            &losses(&[0.0, 0.0]),
+            &[1.0, 1.0],
+            &weights(&[f64::MAX, f64::MAX]),
+            1.0,
+            weight(1.0),
+            alpha,
+            alpha,
+            ImportanceWeightSource::KnownDensityRatio,
+        )
+        .unwrap();
+        assert_eq!(certificate.diagnostics.weight_sum, None);
+        assert_eq!(certificate.diagnostics.weight_sum_overflowed, Some(true));
+        assert_eq!(certificate.diagnostics.weight_sum_of_squares, None);
+        assert_eq!(
+            certificate.diagnostics.weight_sum_of_squares_overflowed,
+            Some(true)
+        );
+        assert!(certificate.diagnostics.risk_adjusted_evalue.is_some());
+    }
+
+    /// A single f64::MAX calibration weight has a representable raw sum
+    /// but not a representable raw sum of squares -- the two overflow
+    /// flags must be independent, not conflated into one.
+    #[test]
+    fn weighted_single_huge_weight_overflows_only_sum_of_squares() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+        let certificate = certify_weighted(
+            &losses(&[0.0]),
+            &[1.0],
+            &weights(&[f64::MAX]),
+            1.0,
+            weight(1.0),
+            alpha,
+            alpha,
+            ImportanceWeightSource::KnownDensityRatio,
+        )
+        .unwrap();
+        assert_eq!(certificate.diagnostics.weight_sum, Some(f64::MAX));
+        assert_eq!(certificate.diagnostics.weight_sum_overflowed, Some(false));
+        assert_eq!(certificate.diagnostics.weight_sum_of_squares, None);
+        assert_eq!(
+            certificate.diagnostics.weight_sum_of_squares_overflowed,
+            Some(true)
+        );
+    }
+
+    /// Regression fixtures from the review: an extreme weight ratio and
+    /// zero weights alongside a huge one must both still produce a
+    /// certificate (the overflow, where it occurs, is confined to the
+    /// diagnostics).
+    #[test]
+    fn weighted_overflow_regression_fixtures_still_certify() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+
+        let extreme_ratio = certify_weighted(
+            &losses(&[0.0, 0.0]),
+            &[1.0, 1.0],
+            &weights(&[1e-300, 1e300]),
+            1.0,
+            weight(1.0),
+            alpha,
+            alpha,
+            ImportanceWeightSource::KnownDensityRatio,
+        )
+        .unwrap();
+        assert!(extreme_ratio.diagnostics.weight_sum.unwrap().is_finite());
+        assert_eq!(
+            extreme_ratio.diagnostics.weight_sum_of_squares_overflowed,
+            Some(true)
+        );
+
+        let zeros_alongside_max = certify_weighted(
+            &losses(&[0.0, 0.0, 0.0]),
+            &[1.0, 1.0, 1.0],
+            &weights(&[0.0, 0.0, f64::MAX]),
+            1.0,
+            weight(1.0),
+            alpha,
+            alpha,
+            ImportanceWeightSource::KnownDensityRatio,
+        )
+        .unwrap();
+        assert_eq!(zeros_alongside_max.diagnostics.weight_sum, Some(f64::MAX));
+        assert_eq!(
+            zeros_alongside_max.diagnostics.weight_sum_overflowed,
+            Some(false)
+        );
+    }
+
+    /// Serde round-trip must keep "not computed" (unweighted `certify`,
+    /// which has no weight diagnostics at all) and "overflowed"
+    /// (`certify_weighted` with two f64::MAX calibration weights)
+    /// distinguishable, the same property already required of
+    /// `risk_adjusted_evalue`/`EValue`.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn weight_sum_overflow_and_not_computed_remain_distinct_after_serde_round_trip() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+
+        let not_computed = certify(&losses(&[0.0]), &[1.0], 0.0, alpha, alpha).unwrap();
+        assert_eq!(not_computed.diagnostics.weight_sum, None);
+        assert_eq!(not_computed.diagnostics.weight_sum_overflowed, None);
+
+        let overflowed = certify_weighted(
+            &losses(&[0.0, 0.0]),
+            &[1.0, 1.0],
+            &weights(&[f64::MAX, f64::MAX]),
+            1.0,
+            weight(1.0),
+            alpha,
+            alpha,
+            ImportanceWeightSource::KnownDensityRatio,
+        )
+        .unwrap();
+        assert_eq!(overflowed.diagnostics.weight_sum, None);
+        assert_eq!(overflowed.diagnostics.weight_sum_overflowed, Some(true));
+
+        let not_computed_json = serde_json::to_string(&not_computed).unwrap();
+        let overflowed_json = serde_json::to_string(&overflowed).unwrap();
+        let not_computed_restored: RiskCertificate<bool> =
+            serde_json::from_str(&not_computed_json).unwrap();
+        let overflowed_restored: RiskCertificate<bool> =
+            serde_json::from_str(&overflowed_json).unwrap();
+
+        assert_eq!(not_computed_restored.diagnostics.weight_sum, None);
+        assert_eq!(
+            not_computed_restored.diagnostics.weight_sum_overflowed,
+            None
+        );
+        assert_eq!(overflowed_restored.diagnostics.weight_sum, None);
+        assert_eq!(
+            overflowed_restored.diagnostics.weight_sum_overflowed,
+            Some(true)
+        );
+        assert_ne!(
+            not_computed_restored.diagnostics.weight_sum_overflowed,
+            overflowed_restored.diagnostics.weight_sum_overflowed
+        );
     }
 
     #[test]
