@@ -190,10 +190,17 @@ other two arms, re-draws the risk coordinate from `P` instead of `Q`,
 weight `1`). At `alpha = gamma = 0.3`, seed `20260730`: at 500 repetitions
 (half-width `0.0607`), `weighted` mean `0.2120`, `control` mean `0.2900`,
 `naive` mean `0.3880`; at 20,000 repetitions (half-width `0.0096`),
-`weighted` mean `0.22485`, `control` mean `0.28780`, `naive` mean
+`weighted` mean `0.22220`, `control` mean `0.28780`, `naive` mean
 `0.38010` — `naive` exceeds `alpha` by a wide margin at both repetition
 counts, confirming the DGP genuinely exercises the weighting rather than
-passing vacuously. This file deliberately does not exercise
+passing vacuously. (The large-scale `weighted` mean moved from an earlier
+`0.22485` to `0.22220` after the review round's weight-normalization fix
+to `weighted_risk_adjusted_evalue` — expected, not a regression: `naive`
+and `control` never divide by `max_weight` in a way that changes anything
+(`naive` skips the weighted path entirely, `control` uses weight `1` so
+normalization is a no-op), and only `weighted`'s near-boundary decisions,
+where `feasibility_epsilon` scales with the now-halved `gamma_scaled`,
+shifted at all.) This file deliberately does not exercise
 `ImportanceWeightSource::Estimated`: a Monte Carlo pass there would only
 bear on Theorem 6.4's asymptotic conclusion, not a finite-sample one, and
 could be misread as validating a guarantee this crate does not make for
