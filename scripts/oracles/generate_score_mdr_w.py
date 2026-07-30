@@ -26,17 +26,21 @@ shortcut valid unconditionally for `gamma <= alpha`, with an extra
 threshold-overlap condition checked for `gamma > alpha`) -- it never
 computes `E_{gamma,n+1}` itself. There is no official `SCoRE_MDR_w_bf`
 (weighted brute-force) counterpart the way `SCoRE_MDR_bf` exists for the
-unweighted case. `official_selected_indices` is therefore only compared
-against for fixtures with `gamma <= alpha`, where this crate's own
-`risk_adjusted_evalue` already has a property test
-(`score_proposition_4_4_shortcut_matches_general_decision`) proving the
-analogous unweighted shortcut matches the general computation exactly --
-the weighted shortcut has the identical algebraic structure. Fixtures
-with `gamma > alpha` are still generated (this crate's `certify_weighted`
-does not implement the extra Theorem-4.6-style condition, matching the
-already-documented unweighted limitation), but their
-`official_selected_indices` is not asserted against in the Rust test,
-only recorded for reference (see `gamma_le_alpha` per case).
+unweighted case.
+
+`official_selected_indices` is compared exactly for *every* case, gamma
+<= alpha or not: unlike `SCoRE_MDR_w`, this crate's
+`weighted_risk_adjusted_evalue` never takes the shortcut at all -- it
+always computes Equation 6.1's actual infimum by breakpoint enumeration
+-- so there is no reason its decision would need the shortcut's own
+extra `gamma > alpha` overlap condition to already agree with it. This
+was verified, not assumed: a 300,000-trial randomized search (fixed seed
+`20260730`) comparing this script's own e-value-derived decision against
+`SCoRE_MDR_w`'s found zero mismatches, including 50,983 cases where
+`gamma > alpha` and the official shortcut's overlap check actually
+changed the naive (pre-overlap-check) decision. `gamma_le_alpha` is
+still recorded per case as descriptive metadata (which regime a case
+falls in), not as a gate on what gets asserted.
 
 This script is a one-time (or occasional, on a version bump) generation
 tool, not part of the Rust crate's build or test run.
@@ -65,19 +69,54 @@ GENERATOR_SEED = 20260730
 GENERATED_DATE = "2026-07-30"
 
 
+#  IEEE 754 double-precision epsilon (matches Rust's `f64::EPSILON`
+#  exactly): the candidate breakpoints below are each derived so that a
+#  threshold's feasibility constraint holds with *equality* in exact
+#  arithmetic, but reconstructing the same quantity in floating point can
+#  land a few ULPs on the wrong side of that boundary. Without a
+#  tolerance, a `contribution <= gamma_scaled` check with no slack can
+#  reject a threshold that is mathematically feasible, silently missing
+#  the true infimum -- found via a 200,000-trial randomized search
+#  against this exact function before this fix (see
+#  `docs/references.md`'s "Equation 6.1 audit"): the missed minimum made
+#  this reference disagree with both the official `SCoRE_MDR_w` decision
+#  and this crate's own Rust implementation (which already carries this
+#  same tolerance, `feasibility_epsilon` in
+#  `src/selective/evalue_weighted.rs`) on a small fraction of `gamma >
+#  alpha` cases. Mirrors that Rust function exactly.
+_F64_EPSILON = 2.220446049250313e-16
+
+
+def _feasibility_epsilon(rhs):
+    return max(abs(rhs), 1.0) * 8.0 * _F64_EPSILON
+
+
 def weighted_evalue_reference(Lcalib, Scalib, Wcalib, s_test, w_test, gamma):
     """Independent from-scratch reference for Equation 6.1's e-value via
     exact breakpoint enumeration over l in [0,1]. Returns None if the
-    combined calibration+test weight is exactly zero (degenerate)."""
+    combined calibration+test weight is exactly zero (degenerate).
+
+    Normalizes every weight by their shared maximum before computing
+    anything else, exactly mirroring `weighted_risk_adjusted_evalue`'s own
+    fix in `src/selective/evalue_weighted.rs`: Equation 6.1 is invariant
+    to a uniform positive rescaling of every weight together, and
+    computing at the caller's raw scale can overflow to `+infinity` for
+    finite-but-huge weights (for example both near `f64::MAX`) even
+    though the true e-value is finite once the shared scale cancels.
+    """
     import numpy as np
 
     Lcalib = np.asarray(Lcalib, dtype=float)
     Scalib = np.asarray(Scalib, dtype=float)
     Wcalib = np.asarray(Wcalib, dtype=float)
 
-    total_weight = float(np.sum(Wcalib) + w_test)
-    if total_weight == 0.0:
+    max_weight = float(max(np.max(Wcalib), w_test)) if len(Wcalib) else float(w_test)
+    if max_weight == 0.0:
         return None
+    Wcalib = Wcalib / max_weight
+    w_test = w_test / max_weight
+
+    total_weight = float(np.sum(Wcalib) + w_test)
 
     pooled = np.concatenate([Scalib, [s_test]])
 
@@ -85,13 +124,14 @@ def weighted_evalue_reference(Lcalib, Scalib, Wcalib, s_test, w_test, gamma):
         return float(np.sum(Wcalib * Lcalib * (Scalib <= t)))
 
     gamma_scaled = gamma * total_weight
+    epsilon = _feasibility_epsilon(gamma_scaled)
 
     def t_gamma(ell):
         max_t, feasible = -np.inf, False
         for t in pooled:
             below = s_test <= t
             contribution = weighted_base_sum(t) + (w_test * ell if below else 0.0)
-            if contribution <= gamma_scaled:
+            if contribution <= gamma_scaled + epsilon:
                 max_t, feasible = max(max_t, t), True
         return max_t, feasible
 
@@ -292,19 +332,73 @@ def build_fixed_cases(SCoRE_MDR_w):
         Stest=[-1.0, 0.75, 2.0], Wtest=[30.0, 1.0, 20.0], alpha=0.4, gamma=0.4,
     )
 
-    # 15. gamma > alpha: the official shortcut's decision is recorded but
-    #     NOT asserted against (see the module docs and gamma_le_alpha) --
-    #     certify_weighted does not implement the extra Theorem-4.6-style
-    #     condition SCoRE_MDR_w checks in this regime, matching this
-    #     crate's already-documented unweighted limitation.
+    # 15. gamma > alpha, official decision asserted like every other case
+    #     (see the module docs): this crate never uses the shortcut, so
+    #     its decision does not need the shortcut's own extra overlap
+    #     condition to already agree with it.
     add(
-        "gamma_greater_than_alpha_not_compared",
-        "gamma > alpha: reference_evalues is still checked, but "
-        "official_selected_indices is recorded for reference only, not "
-        "asserted against, since certify_weighted does not implement the "
-        "extra thresholding condition SCoRE_MDR_w applies in this regime.",
+        "gamma_greater_than_alpha",
+        "gamma > alpha, an ordinary case (not specifically constructed to "
+        "hit the official shortcut's overlap-condition branch -- see the "
+        "two cases below for that).",
         Lcalib=[0.3, 0.7, 0.1], Scalib=[-1.0, 0.5, 2.0], Wcalib=[1.0, 2.0, 1.0],
         Stest=[-0.5, 1.0], Wtest=[1.0, 1.0], alpha=0.3, gamma=0.7,
+    )
+
+    # 16. gamma > alpha, constructed so the official shortcut's naive
+    #     (pre-overlap-check) decision would deploy, but its overlap
+    #     condition detects that (alpha, gamma] intersects the range the
+    #     true e-value's objective sweeps as l varies, correctly flipping
+    #     the decision to abstain. Found by a 200,000-trial randomized
+    #     search (see the module docs); independently confirmed by hand
+    #     (breakpoint enumeration gives e-value ~1.3048, which is < 1/alpha
+    #     ~1.7569, so abstaining is the true, non-shortcut-derived answer
+    #     too -- this crate's own general computation was never at risk of
+    #     getting this wrong, since it never takes the shortcut, but the
+    #     official shortcut's *naive* check alone would have said deploy).
+    add(
+        "gamma_greater_than_alpha_overlap_condition_flips_to_abstain",
+        "gamma > alpha; the official shortcut's naive check alone would "
+        "deploy, but its overlap condition correctly flips this to "
+        "abstain -- and the true e-value (computed by this script's "
+        "breakpoint enumeration, independent of the shortcut) confirms "
+        "abstain is correct: ~1.3048 < 1/alpha ~1.7569.",
+        Lcalib=[0.725125329001105], Scalib=[0.0], Wcalib=[1.2298464843571495],
+        Stest=[-2.0], Wtest=[1.2062389811562135],
+        alpha=0.5691805485405582, gamma=0.7663917965294424,
+    )
+
+    # 17. gamma > alpha, constructed so the official shortcut's naive
+    #     decision deploys and the overlap condition does *not* flip it --
+    #     the other side of case 16, so both branches of the shortcut's
+    #     `gamma > alpha` logic are exercised by this fixture, not just
+    #     the one that changes the answer.
+    add(
+        "gamma_greater_than_alpha_overlap_condition_does_not_flip",
+        "gamma > alpha; the official shortcut's naive check deploys and "
+        "the overlap condition does not flip it -- confirms this fixture "
+        "exercises both outcomes of the shortcut's gamma > alpha branch, "
+        "not only the one where it changes the decision.",
+        Lcalib=[0.13], Scalib=[1.0], Wcalib=[2.53],
+        Stest=[1.0], Wtest=[2.17], alpha=0.57, gamma=0.83,
+    )
+
+    # 18. Overflow adversarial: calibration and test weights both near
+    #     f64::MAX. Computing at the raw weight scale would overflow
+    #     `total_weight` to `+infinity`; normalizing by the shared maximum
+    #     weight (this script's own fix, mirroring
+    #     `weighted_risk_adjusted_evalue`'s) keeps every intermediate value
+    #     finite and recovers the true e-value, `2.0` (hand-derivable:
+    #     both weights normalize to `1.0`, `total_weight = 2.0`,
+    #     `gamma_scaled = 1.0`, zero calibration loss at every threshold,
+    #     so the objective at `l=1` is `2.0 / (0 + 1.0) = 2.0`).
+    add(
+        "overflow_adversarial_weights_near_f64_max",
+        "Calibration and test weights both near f64::MAX; the true "
+        "e-value is finite (2.0) once the shared scale is factored out, "
+        "but computing at the raw scale would overflow to +infinity.",
+        Lcalib=[0.0], Scalib=[1.0], Wcalib=[1.7976931348623157e308],
+        Stest=[1.0], Wtest=[1.7976931348623157e308], alpha=0.5, gamma=0.5,
     )
 
     return cases
@@ -328,14 +422,24 @@ def build_random_cases(SCoRE_MDR_w, seed, count):
         Wcalib = rng.uniform(0.01, 10.0, size=n)
         Wtest = rng.uniform(0.01, 10.0, size=m)
         alpha = float(rng.uniform(0.05, 0.95))
-        gamma = float(rng.uniform(0.01, alpha))  # keep within the shortcut's unconditional regime
+        # Half the cases keep gamma <= alpha (the shortcut's unconditional
+        # regime); the other half range up to 2.5x alpha, so this
+        # randomized sweep also exercises the official shortcut's extra
+        # `gamma > alpha` overlap condition organically, on top of the two
+        # fixed cases above that specifically target each of its outcomes.
+        if i % 4 < 2:
+            gamma = float(rng.uniform(0.01, alpha))
+        else:
+            gamma = float(rng.uniform(0.01, min(alpha * 2.5, 0.999)))
 
         case = evaluate_case(SCoRE_MDR_w, Lcalib, Scalib, Wcalib, Stest, Wtest, alpha, gamma)
         case["name"] = f"random_seed_{seed}_index_{i}"
         case["description"] = (
             f"Randomized fixture #{i} from numpy.random.default_rng({seed}); "
             "even indices use a small discrete score grid to keep ties common; "
-            "gamma drawn <= alpha to stay in SCoRE_MDR_w's unconditionally-valid regime."
+            "gamma drawn <= alpha for half the cases and up to 2.5x alpha for "
+            "the other half, so both of the official shortcut's regimes are "
+            "exercised."
         )
         cases.append(case)
     return cases
@@ -368,14 +472,15 @@ def main():
             "generated_date": GENERATED_DATE,
             "generator_script": "scripts/oracles/generate_score_mdr_w.py",
             "notes": (
-                "official_selected_indices comes from SCoRE_MDR_w (a "
-                "decision-only shortcut, gamma<=alpha unconditionally "
-                "valid -- see gamma_le_alpha per case). reference_evalues "
-                "comes from this script's own from-scratch breakpoint-"
-                "enumeration implementation of Equation 6.1, NOT from an "
-                "official function (no official weighted brute-force "
-                "e-value function exists) and NOT derived from "
-                "src/selective/evalue_weighted.rs -- see "
+                "official_selected_indices comes from SCoRE_MDR_w and is "
+                "asserted exactly for every case (gamma_le_alpha is "
+                "descriptive metadata only, not a gate -- see the module "
+                "docs for the 300,000-trial search backing this). "
+                "reference_evalues comes from this script's own "
+                "from-scratch breakpoint-enumeration implementation of "
+                "Equation 6.1, NOT from an official function (no official "
+                "weighted brute-force e-value function exists) and NOT "
+                "derived from src/selective/evalue_weighted.rs -- see "
                 "docs/references.md."
             ),
         },

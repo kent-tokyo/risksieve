@@ -10,7 +10,7 @@
     "generator_seed": 20260730,
     "generated_date": "2026-07-30",
     "generator_script": "scripts/oracles/generate_score_mdr_w.py",
-    "notes": "official_selected_indices comes from SCoRE_MDR_w (a decision-only shortcut, gamma<=alpha unconditionally valid -- see gamma_le_alpha per case). reference_evalues comes from this script's own from-scratch breakpoint-enumeration implementation of Equation 6.1, NOT from an official function (no official weighted brute-force e-value function exists) and NOT derived from src/selective/evalue_weighted.rs -- see docs/references.md."
+    "notes": "official_selected_indices comes from SCoRE_MDR_w and is asserted exactly for every case (gamma_le_alpha is descriptive metadata only, not a gate -- see the module docs for the 300,000-trial search backing this). reference_evalues comes from this script's own from-scratch breakpoint-enumeration implementation of Equation 6.1, NOT from an official function (no official weighted brute-force e-value function exists) and NOT derived from src/selective/evalue_weighted.rs -- see docs/references.md."
   },
   "cases": [
     {
@@ -313,9 +313,9 @@
       "alpha": 0.5,
       "gamma": 0.3,
       "reference_evalues": [
-        7.0,
-        7.0,
-        7.0
+        7.000000000000001,
+        7.000000000000001,
+        7.000000000000001
       ],
       "official_selected_indices": [
         0,
@@ -533,7 +533,7 @@
       "gamma": 0.4,
       "reference_evalues": [
         2.5,
-        3.1020408163265305,
+        3.10204081632653,
         2.5
       ],
       "official_selected_indices": [
@@ -577,8 +577,90 @@
       ],
       "official_selected_indices": [],
       "gamma_le_alpha": false,
-      "name": "gamma_greater_than_alpha_not_compared",
-      "description": "gamma > alpha: reference_evalues is still checked, but official_selected_indices is recorded for reference only, not asserted against, since certify_weighted does not implement the extra thresholding condition SCoRE_MDR_w applies in this regime."
+      "name": "gamma_greater_than_alpha",
+      "description": "gamma > alpha, an ordinary case (not specifically constructed to hit the official shortcut's overlap-condition branch -- see the two cases below for that)."
+    },
+    {
+      "calibration_losses": [
+        0.725125329001105
+      ],
+      "calibration_scores": [
+        0.0
+      ],
+      "calibration_weights": [
+        1.2298464843571495
+      ],
+      "test_scores": [
+        -2.0
+      ],
+      "test_weights": [
+        1.2062389811562135
+      ],
+      "alpha": 0.5691805485405582,
+      "gamma": 0.7663917965294424,
+      "reference_evalues": [
+        1.304815636764952
+      ],
+      "official_selected_indices": [],
+      "gamma_le_alpha": false,
+      "name": "gamma_greater_than_alpha_overlap_condition_flips_to_abstain",
+      "description": "gamma > alpha; the official shortcut's naive check alone would deploy, but its overlap condition correctly flips this to abstain -- and the true e-value (computed by this script's breakpoint enumeration, independent of the shortcut) confirms abstain is correct: ~1.3048 < 1/alpha ~1.7569."
+    },
+    {
+      "calibration_losses": [
+        0.13
+      ],
+      "calibration_scores": [
+        1.0
+      ],
+      "calibration_weights": [
+        2.53
+      ],
+      "test_scores": [
+        1.0
+      ],
+      "test_weights": [
+        2.17
+      ],
+      "alpha": 0.57,
+      "gamma": 0.83,
+      "reference_evalues": [
+        1.8808275641282162
+      ],
+      "official_selected_indices": [
+        0
+      ],
+      "gamma_le_alpha": false,
+      "name": "gamma_greater_than_alpha_overlap_condition_does_not_flip",
+      "description": "gamma > alpha; the official shortcut's naive check deploys and the overlap condition does not flip it -- confirms this fixture exercises both outcomes of the shortcut's gamma > alpha branch, not only the one where it changes the decision."
+    },
+    {
+      "calibration_losses": [
+        0.0
+      ],
+      "calibration_scores": [
+        1.0
+      ],
+      "calibration_weights": [
+        1.7976931348623157e+308
+      ],
+      "test_scores": [
+        1.0
+      ],
+      "test_weights": [
+        1.7976931348623157e+308
+      ],
+      "alpha": 0.5,
+      "gamma": 0.5,
+      "reference_evalues": [
+        2.0
+      ],
+      "official_selected_indices": [
+        0
+      ],
+      "gamma_le_alpha": true,
+      "name": "overflow_adversarial_weights_near_f64_max",
+      "description": "Calibration and test weights both near f64::MAX; the true e-value is finite (2.0) once the shared scale is factored out, but computing at the raw scale would overflow to +infinity."
     },
     {
       "calibration_losses": [
@@ -634,7 +716,7 @@
       "official_selected_indices": [],
       "gamma_le_alpha": true,
       "name": "random_seed_20260730_index_0",
-      "description": "Randomized fixture #0 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha to stay in SCoRE_MDR_w's unconditionally-valid regime."
+      "description": "Randomized fixture #0 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
     },
     {
       "calibration_losses": [
@@ -684,7 +766,7 @@
       ],
       "gamma_le_alpha": true,
       "name": "random_seed_20260730_index_1",
-      "description": "Randomized fixture #1 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha to stay in SCoRE_MDR_w's unconditionally-valid regime."
+      "description": "Randomized fixture #1 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
     },
     {
       "calibration_losses": [
@@ -724,7 +806,7 @@
         0.8930622332494894
       ],
       "alpha": 0.9136148365055475,
-      "gamma": 0.13793413280879455,
+      "gamma": 0.15002299678611025,
       "reference_evalues": [
         0.0,
         0.0,
@@ -734,7 +816,7 @@
       "official_selected_indices": [],
       "gamma_le_alpha": true,
       "name": "random_seed_20260730_index_2",
-      "description": "Randomized fixture #2 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha to stay in SCoRE_MDR_w's unconditionally-valid regime."
+      "description": "Randomized fixture #2 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
     },
     {
       "calibration_losses": [
@@ -759,7 +841,7 @@
         5.72778712618454
       ],
       "alpha": 0.18492838247208265,
-      "gamma": 0.024822764274935027,
+      "gamma": 0.04832795350487182,
       "reference_evalues": [
         0.0,
         0.0,
@@ -769,7 +851,7 @@
       "official_selected_indices": [],
       "gamma_le_alpha": true,
       "name": "random_seed_20260730_index_3",
-      "description": "Randomized fixture #3 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha to stay in SCoRE_MDR_w's unconditionally-valid regime."
+      "description": "Randomized fixture #3 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
     },
     {
       "calibration_losses": [
@@ -813,7 +895,7 @@
       "official_selected_indices": [],
       "gamma_le_alpha": true,
       "name": "random_seed_20260730_index_4",
-      "description": "Randomized fixture #4 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha to stay in SCoRE_MDR_w's unconditionally-valid regime."
+      "description": "Randomized fixture #4 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
     },
     {
       "calibration_losses": [
@@ -857,7 +939,7 @@
       "official_selected_indices": [],
       "gamma_le_alpha": true,
       "name": "random_seed_20260730_index_5",
-      "description": "Randomized fixture #5 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha to stay in SCoRE_MDR_w's unconditionally-valid regime."
+      "description": "Randomized fixture #5 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
     },
     {
       "calibration_losses": [
@@ -893,18 +975,18 @@
         2.6998786204680565
       ],
       "alpha": 0.1360896965180155,
-      "gamma": 0.12201024548416628,
+      "gamma": 0.3033506809336716,
       "reference_evalues": [
+        3.2965147693822137,
         0.0,
-        0.0,
-        0.0,
+        5.467438287781222,
         0.0,
         0.0
       ],
       "official_selected_indices": [],
-      "gamma_le_alpha": true,
+      "gamma_le_alpha": false,
       "name": "random_seed_20260730_index_6",
-      "description": "Randomized fixture #6 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha to stay in SCoRE_MDR_w's unconditionally-valid regime."
+      "description": "Randomized fixture #6 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
     },
     {
       "calibration_losses": [
@@ -934,18 +1016,18 @@
         9.06489031949521
       ],
       "alpha": 0.32693515628333275,
-      "gamma": 0.2761121997271027,
+      "gamma": 0.6878751355288878,
       "reference_evalues": [
-        0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0
+        1.7452904079772642,
+        2.347169359437365,
+        2.1111777263157507,
+        1.843964910937474,
+        1.7282861340105726
       ],
       "official_selected_indices": [],
-      "gamma_le_alpha": true,
+      "gamma_le_alpha": false,
       "name": "random_seed_20260730_index_7",
-      "description": "Randomized fixture #7 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha to stay in SCoRE_MDR_w's unconditionally-valid regime."
+      "description": "Randomized fixture #7 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
     },
     {
       "calibration_losses": [
@@ -989,7 +1071,7 @@
       "gamma": 0.31988486471603356,
       "reference_evalues": [
         0.0,
-        3.126124772698185,
+        3.1261247726981845,
         3.126124772698185
       ],
       "official_selected_indices": [
@@ -998,7 +1080,7 @@
       ],
       "gamma_le_alpha": true,
       "name": "random_seed_20260730_index_8",
-      "description": "Randomized fixture #8 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha to stay in SCoRE_MDR_w's unconditionally-valid regime."
+      "description": "Randomized fixture #8 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
     },
     {
       "calibration_losses": [
@@ -1024,7 +1106,7 @@
       "official_selected_indices": [],
       "gamma_le_alpha": true,
       "name": "random_seed_20260730_index_9",
-      "description": "Randomized fixture #9 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha to stay in SCoRE_MDR_w's unconditionally-valid regime."
+      "description": "Randomized fixture #9 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
     },
     {
       "calibration_losses": [
@@ -1063,18 +1145,20 @@
         9.836322629513162
       ],
       "alpha": 0.2596467823989941,
-      "gamma": 0.12713723393618223,
+      "gamma": 0.30988126291011936,
       "reference_evalues": [
         0.0,
-        0.0,
+        5.386581392387718,
         0.0,
         0.0,
         0.0
       ],
-      "official_selected_indices": [],
-      "gamma_le_alpha": true,
+      "official_selected_indices": [
+        1
+      ],
+      "gamma_le_alpha": false,
       "name": "random_seed_20260730_index_10",
-      "description": "Randomized fixture #10 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha to stay in SCoRE_MDR_w's unconditionally-valid regime."
+      "description": "Randomized fixture #10 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
     },
     {
       "calibration_losses": [
@@ -1113,15 +1197,15 @@
         0.35753723488344596
       ],
       "alpha": 0.14076317471138053,
-      "gamma": 0.11351138901988689,
+      "gamma": 0.2806523876540679,
       "reference_evalues": [
         0.0,
         0.0
       ],
       "official_selected_indices": [],
-      "gamma_le_alpha": true,
+      "gamma_le_alpha": false,
       "name": "random_seed_20260730_index_11",
-      "description": "Randomized fixture #11 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha to stay in SCoRE_MDR_w's unconditionally-valid regime."
+      "description": "Randomized fixture #11 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
     },
     {
       "calibration_losses": [
@@ -1150,7 +1234,7 @@
       "official_selected_indices": [],
       "gamma_le_alpha": true,
       "name": "random_seed_20260730_index_12",
-      "description": "Randomized fixture #12 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha to stay in SCoRE_MDR_w's unconditionally-valid regime."
+      "description": "Randomized fixture #12 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
     },
     {
       "calibration_losses": [
@@ -1199,7 +1283,7 @@
       ],
       "gamma_le_alpha": true,
       "name": "random_seed_20260730_index_13",
-      "description": "Randomized fixture #13 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha to stay in SCoRE_MDR_w's unconditionally-valid regime."
+      "description": "Randomized fixture #13 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
     },
     {
       "calibration_losses": [
@@ -1230,14 +1314,14 @@
         3.073973493995714
       ],
       "alpha": 0.21012152970812958,
-      "gamma": 0.12061373647508185,
+      "gamma": 0.29482533341400896,
       "reference_evalues": [
         0.0
       ],
       "official_selected_indices": [],
-      "gamma_le_alpha": true,
+      "gamma_le_alpha": false,
       "name": "random_seed_20260730_index_14",
-      "description": "Randomized fixture #14 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha to stay in SCoRE_MDR_w's unconditionally-valid regime."
+      "description": "Randomized fixture #14 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
     },
     {
       "calibration_losses": [
@@ -1267,18 +1351,18 @@
         7.367469810433887
       ],
       "alpha": 0.31462869406328925,
-      "gamma": 0.2015523283890956,
+      "gamma": 0.4983129098791093,
       "reference_evalues": [
-        0.0,
+        2.006771207758996,
         0.0,
         0.0,
         0.0,
         0.0
       ],
       "official_selected_indices": [],
-      "gamma_le_alpha": true,
+      "gamma_le_alpha": false,
       "name": "random_seed_20260730_index_15",
-      "description": "Randomized fixture #15 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha to stay in SCoRE_MDR_w's unconditionally-valid regime."
+      "description": "Randomized fixture #15 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
     },
     {
       "calibration_losses": [
@@ -1319,8 +1403,8 @@
       "reference_evalues": [
         2.0486958877247594,
         2.420771518583868,
-        2.167315875975343,
-        1.8742645754057299
+        2.1673158759753424,
+        1.8742645754057297
       ],
       "official_selected_indices": [
         0,
@@ -1330,7 +1414,7 @@
       ],
       "gamma_le_alpha": true,
       "name": "random_seed_20260730_index_16",
-      "description": "Randomized fixture #16 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha to stay in SCoRE_MDR_w's unconditionally-valid regime."
+      "description": "Randomized fixture #16 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
     },
     {
       "calibration_losses": [
@@ -1356,7 +1440,7 @@
       "official_selected_indices": [],
       "gamma_le_alpha": true,
       "name": "random_seed_20260730_index_17",
-      "description": "Randomized fixture #17 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha to stay in SCoRE_MDR_w's unconditionally-valid regime."
+      "description": "Randomized fixture #17 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
     },
     {
       "calibration_losses": [
@@ -1389,18 +1473,18 @@
         4.412355008210814
       ],
       "alpha": 0.6204590847597882,
-      "gamma": 0.39923254136251324,
+      "gamma": 0.6405926032028852,
       "reference_evalues": [
+        1.5610545532373015,
+        1.5610545532373015,
         0.0,
-        0.0,
-        0.0,
-        0.0,
-        0.0
+        1.5755771149960298,
+        1.5610545532373015
       ],
       "official_selected_indices": [],
-      "gamma_le_alpha": true,
+      "gamma_le_alpha": false,
       "name": "random_seed_20260730_index_18",
-      "description": "Randomized fixture #18 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha to stay in SCoRE_MDR_w's unconditionally-valid regime."
+      "description": "Randomized fixture #18 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
     },
     {
       "calibration_losses": [
@@ -1432,16 +1516,16 @@
         2.948724173226535
       ],
       "alpha": 0.1413410793181835,
-      "gamma": 0.0965456778692941,
+      "gamma": 0.23624827035449614,
       "reference_evalues": [
-        0.0,
+        4.232835222452533,
         0.0,
         0.0
       ],
       "official_selected_indices": [],
-      "gamma_le_alpha": true,
+      "gamma_le_alpha": false,
       "name": "random_seed_20260730_index_19",
-      "description": "Randomized fixture #19 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha to stay in SCoRE_MDR_w's unconditionally-valid regime."
+      "description": "Randomized fixture #19 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
     }
   ]
 }

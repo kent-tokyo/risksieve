@@ -23,9 +23,18 @@
 //!   requires the Rust side to agree it is exactly
 //!   `EValue::PositiveInfinity`, not merely "large".
 //! - `official_selected_indices`: the actual deploy/abstain decision from
-//!   the official `SCoRE_MDR_w` shortcut, checked exactly, but only for
-//!   cases with `gamma_le_alpha: true` (the shortcut's unconditionally-
-//!   valid regime; see the fixture generator's module docs).
+//!   the official `SCoRE_MDR_w` shortcut, checked exactly for *every*
+//!   case. Unlike `SCoRE_MDR`'s unweighted shortcut (which this crate
+//!   also never uses, but has not verified against for `gamma > alpha`),
+//!   this crate's own `weighted_risk_adjusted_evalue` never takes any
+//!   shortcut at all -- it always computes Equation 6.1's actual infimum
+//!   -- so its decision does not depend on the shortcut's `gamma > alpha`
+//!   overlap condition already agreeing with it; a 300,000-trial
+//!   randomized search (see the fixture generator's module docs) found
+//!   zero mismatches, including cases where that overlap condition
+//!   changes the shortcut's naive decision. `gamma_le_alpha` is still
+//!   recorded per case as descriptive metadata, not as a gate on this
+//!   comparison.
 
 use risksieve::selective::evalue_weighted::{EValue, weighted_risk_adjusted_evalue};
 use risksieve::{ClosedUnitInterval, NonNegative, OpenUnitInterval};
@@ -120,7 +129,6 @@ fn weighted_evalues_match_reference_and_official_decisions() {
             .collect();
         let alpha = OpenUnitInterval::new("alpha", case["alpha"].as_f64().unwrap()).unwrap();
         let gamma = OpenUnitInterval::new("gamma", case["gamma"].as_f64().unwrap()).unwrap();
-        let gamma_le_alpha = case["gamma_le_alpha"].as_bool().unwrap();
 
         let expected_evalues: Vec<Option<EValue>> = case["reference_evalues"]
             .as_array()
@@ -179,11 +187,9 @@ fn weighted_evalues_match_reference_and_official_decisions() {
             }
         }
 
-        if gamma_le_alpha {
-            assert_eq!(
-                actual_selected, expected_selected,
-                "case `{name}`: selected indices mismatch (gamma <= alpha, official shortcut is unconditionally valid here)"
-            );
-        }
+        assert_eq!(
+            actual_selected, expected_selected,
+            "case `{name}`: selected indices mismatch against the official SCoRE_MDR_w decision"
+        );
     }
 }
