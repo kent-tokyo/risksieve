@@ -56,15 +56,82 @@
 //! this theorem** -- see `super::evalue`'s module docs. A poor score
 //! can still severely reduce how often a genuinely trustworthy point
 //! gets deployed, even though `MDR <= alpha` never breaks.
+//!
+//! ## Weighted MDR under covariate shift
+//!
+//! [`certify_weighted`] extends [`certify`] to Section 6's covariate-shift
+//! setting (Equation 6.1, Theorem 6.2, Theorem 6.4; see
+//! `super::evalue_weighted`'s module docs for the full derivation and its
+//! correspondence to the official `SCoRE_MDR_w`). It takes an explicit
+//! [`ImportanceWeightSource`] -- never defaulted -- that determines the
+//! returned certificate's [`GuaranteeKind`]:
+//!
+//! - [`ImportanceWeightSource::KnownDensityRatio`]: the importance weight
+//!   is exactly known (Assumption 6.1's `w(.)`), so Theorem 6.2 applies
+//!   and the certificate is [`GuaranteeKind::MarginalDeploymentRisk`],
+//!   the same finite-sample guarantee kind [`certify`] returns.
+//! - [`ImportanceWeightSource::Estimated`]: **only** yields
+//!   [`GuaranteeKind::Asymptotic`] when *every one* of Theorem 6.4's four
+//!   hypotheses is declared true: `training_data_separate_from_calibration`,
+//!   `consistency` (`L2(P_X)`-consistency of the estimator sequence) and
+//!   `threshold_regularity` (continuity and strict monotonicity of the
+//!   paper's `F` at `t*`) both `Asserted`, *and* the caller passed
+//!   `gamma == alpha` exactly (Theorem 6.4 is stated only for that choice
+//!   -- checked as exact `f64` equality, not an approximate comparison,
+//!   so a caller who did not deliberately pass the same value twice does
+//!   not get credited with meeting this hypothesis). Any one of these
+//!   missing downgrades the certificate to [`GuaranteeKind::EmpiricalOnly`]
+//!   rather than erroring: `certify_weighted` still returns a real
+//!   deploy/abstain decision from the same e-value computation, just
+//!   without a theorem attached to it -- the same choice
+//!   `nonmonotone::stability::certify` makes for `StabilityEvidence::Estimated`
+//!   without the full analytic hypothesis. Declaring `KnownDensityRatio`,
+//!   and every field of `Estimated`, is the caller's assertion, not
+//!   something this crate verifies from data (AGENTS.md section 4:
+//!   caller-declared assumptions are recorded as such, never silently
+//!   upgraded to "library-checked").
+//!
+//! [`crate::anytime::shifted::AnytimeShiftedController`] uses the same
+//! [`ImportanceWeightSource`] type but downgrades *every* `Estimated`
+//! case to [`GuaranteeKind::EmpiricalOnly`] unconditionally, regardless of
+//! these fields: Hultberg, Zachariah, and Ribeiro (2026), Theorem 4.7
+//! never discusses estimated weights at all (it takes the importance
+//! weight `omega` as known, a standing hypothesis of the theorem itself,
+//! not something it relaxes) -- so there is no asymptotic argument for
+//! that controller to condition on in the first place. This module's
+//! `Estimated` downgrade path exists *because* Theorem 6.4 is a real,
+//! separate theorem with its own stated hypotheses; it is not a general
+//! license to call any estimated-weight case `Asymptotic`.
+//!
+//! Weights carry no normalization requirement and are invariant to a
+//! *uniform* positive rescaling of every weight together (calibration
+//! *and* the test point) -- see `super::evalue_weighted`'s module docs.
+//! `certify_weighted`'s `Assumptions::exchangeability` is
+//! `ExchangeabilityAssumption::CovariateShiftIid` (Assumption 6.1 states
+//! i.i.d. draws *within* each of the calibration and test distributions,
+//! which differ from each other -- a different claim from
+//! `ExchangeabilityAssumption::Iid`, which asserts calibration and test
+//! are drawn from the *same* distribution), matching how
+//! [`crate::anytime::shifted::AnytimeShiftedController`] records the
+//! analogous assumption for Theorem 4.7.
+//!
+//! **Not implemented in this module:** Remark 6.6's "doubly robust"
+//! refinement (asymptotic MDR control from a finite-sample balancing
+//! condition even when only the weights *or* only a conditional-risk
+//! model is consistent, not both) requires additional estimator
+//! machinery the paper defers to an appendix; see `docs/roadmap.md`.
 
-use crate::certificate::{Diagnostics, RiskCertificate};
+use crate::certificate::{Diagnostics, EValue, RiskCertificate};
 use crate::error::RiskSieveError;
 use crate::guarantee::{
-    Assumptions, ExchangeabilityAssumption, GuaranteeKind, MonotonicityAssumption, ShiftAssumption,
-    StabilityEvidence, SymmetryAssumption,
+    Assumptions, ExchangeabilityAssumption, GuaranteeKind, ImportanceWeightSource,
+    MonotonicityAssumption, ShiftAssumption, StabilityEvidence, SymmetryAssumption,
+    ThresholdRegularityEvidence, WeightConsistencyEvidence,
 };
-use crate::probability::{ClosedInterval, ClosedUnitInterval, OpenUnitInterval};
+use crate::probability::{ClosedInterval, ClosedUnitInterval, NonNegative, OpenUnitInterval};
 use crate::selective::evalue::risk_adjusted_evalue;
+use crate::selective::evalue_weighted::weighted_risk_adjusted_evalue;
+use crate::shift::importance::WeightSummary;
 
 /// Runs Algorithm 1 (SCoRE-MDR) for one test point and returns its
 /// deployment-decision certificate.
@@ -125,9 +192,140 @@ pub fn certify(
         assumptions,
         calibration_size,
         diagnostics: Diagnostics {
-            risk_adjusted_evalue: Some(outcome.value.get()),
+            risk_adjusted_evalue: Some(EValue::Finite(outcome.value)),
             gamma: Some(gamma.get()),
             uninformative_result: Some(!outcome.feasible_threshold_found),
+            ..Default::default()
+        },
+    })
+}
+
+/// Runs the weighted extension of Algorithm 1 (Equation 6.1, Theorem 6.2 /
+/// 6.4) for one test point under covariate shift and returns its
+/// deployment-decision certificate.
+///
+/// See the module docs ("Weighted MDR under covariate shift") for how
+/// `weight_source` determines the returned `GuaranteeKind`, and
+/// `super::evalue_weighted`'s module docs for the full derivation.
+///
+/// # Errors
+///
+/// - [`RiskSieveError::AssumptionMismatch`] if `calibration_losses`,
+///   `calibration_scores`, and `calibration_weights` do not all have the
+///   same length.
+/// - [`RiskSieveError::EmptyCalibrationSet`] if they are empty.
+/// - [`RiskSieveError::NonFiniteValue`] if `test_score` or any
+///   calibration score is NaN or infinite.
+/// - [`RiskSieveError::DegenerateWeights`] if every calibration weight
+///   and `test_weight` are exactly zero.
+///
+/// # Example
+///
+/// ```
+/// use risksieve::selective::mdr::certify_weighted;
+/// use risksieve::{
+///     ClosedUnitInterval, GuaranteeKind, ImportanceWeightSource, NonNegative, OpenUnitInterval,
+/// };
+///
+/// let losses: Vec<ClosedUnitInterval> = (0..20)
+///     .map(|i| ClosedUnitInterval::new("loss", if i % 4 == 0 { 1.0 } else { 0.0 }).unwrap())
+///     .collect();
+/// let scores: Vec<f64> = (0..20).map(|i| i as f64).collect();
+/// let weights: Vec<NonNegative> = (0..20).map(|_| NonNegative::new("weight", 1.0).unwrap()).collect();
+/// let alpha = OpenUnitInterval::new("alpha", 0.3)?;
+/// let certificate = certify_weighted(
+///     &losses,
+///     &scores,
+///     &weights,
+///     -1.0,
+///     NonNegative::new("weight", 1.0)?,
+///     alpha,
+///     alpha,
+///     ImportanceWeightSource::KnownDensityRatio,
+/// )?;
+/// assert_eq!(certificate.guarantee, GuaranteeKind::MarginalDeploymentRisk);
+/// # Ok::<(), risksieve::RiskSieveError>(())
+/// ```
+#[allow(clippy::too_many_arguments)]
+pub fn certify_weighted(
+    calibration_losses: &[ClosedUnitInterval],
+    calibration_scores: &[f64],
+    calibration_weights: &[NonNegative],
+    test_score: f64,
+    test_weight: NonNegative,
+    alpha: OpenUnitInterval,
+    gamma: OpenUnitInterval,
+    weight_source: ImportanceWeightSource,
+) -> Result<RiskCertificate<bool>, RiskSieveError> {
+    let calibration_size = calibration_losses.len();
+    let outcome = weighted_risk_adjusted_evalue(
+        calibration_losses,
+        calibration_scores,
+        calibration_weights,
+        test_score,
+        test_weight,
+        gamma,
+    )?;
+    let deploy = outcome.value.clears_deployment_threshold(alpha);
+
+    let guarantee = match &weight_source {
+        ImportanceWeightSource::KnownDensityRatio => GuaranteeKind::MarginalDeploymentRisk,
+        ImportanceWeightSource::Estimated {
+            training_data_separate_from_calibration,
+            consistency,
+            threshold_regularity,
+            ..
+        } => {
+            let meets_theorem_6_4 = *training_data_separate_from_calibration
+                && matches!(consistency, WeightConsistencyEvidence::Asserted { .. })
+                && matches!(
+                    threshold_regularity,
+                    ThresholdRegularityEvidence::Asserted { .. }
+                )
+                && gamma.get() == alpha.get();
+            if meets_theorem_6_4 {
+                GuaranteeKind::Asymptotic
+            } else {
+                GuaranteeKind::EmpiricalOnly
+            }
+        }
+    };
+
+    let assumptions = Assumptions {
+        exchangeability: ExchangeabilityAssumption::CovariateShiftIid,
+        bounded_loss: ClosedInterval::new(0.0, 1.0)?,
+        monotonicity: MonotonicityAssumption::NonMonotone,
+        right_continuity: false,
+        symmetry: SymmetryAssumption::ProvenSymmetric,
+        stability: StabilityEvidence::Unknown,
+        shift: ShiftAssumption::CovariateShift { weight_source },
+    };
+
+    // A scale-safe summary, not `WeightAccumulator`: the actual e-value
+    // above already normalizes by the shared maximum weight and stays
+    // exact regardless, so a diagnostic-only overflow here must not fail
+    // the whole call the way `WeightAccumulator::update` deliberately
+    // does for `AnytimeShiftedController` (see the module docs).
+    let weight_summary = WeightSummary::compute(calibration_weights);
+
+    Ok(RiskCertificate {
+        parameter: deploy,
+        target_risk: alpha.get(),
+        certified_upper_bound: alpha.get(),
+        guarantee,
+        assumptions,
+        calibration_size,
+        diagnostics: Diagnostics {
+            risk_adjusted_evalue: Some(outcome.value),
+            gamma: Some(gamma.get()),
+            uninformative_result: Some(!outcome.feasible_threshold_found),
+            weight_sum: weight_summary.sum,
+            weight_sum_of_squares: weight_summary.sum_of_squares,
+            weight_sum_overflowed: Some(weight_summary.sum_overflowed),
+            weight_sum_of_squares_overflowed: Some(weight_summary.sum_of_squares_overflowed),
+            effective_sample_size: Some(weight_summary.effective_sample_size),
+            weight_range: weight_summary.range,
+            test_weight: Some(test_weight.get()),
             ..Default::default()
         },
     })
@@ -142,6 +340,10 @@ mod tests {
             .iter()
             .map(|&v| ClosedUnitInterval::new("loss", v).unwrap())
             .collect()
+    }
+
+    fn finite(v: f64) -> EValue {
+        EValue::Finite(NonNegative::new("e", v).unwrap())
     }
 
     #[test]
@@ -159,7 +361,10 @@ mod tests {
         let certificate = certify(&losses(&[1.0]), &[0.0], 1.0, alpha, alpha).unwrap();
         assert!(!certificate.parameter);
         assert_eq!(certificate.guarantee, GuaranteeKind::MarginalDeploymentRisk);
-        assert_eq!(certificate.diagnostics.risk_adjusted_evalue, Some(0.0));
+        assert_eq!(
+            certificate.diagnostics.risk_adjusted_evalue,
+            Some(finite(0.0))
+        );
     }
 
     #[test]
@@ -169,6 +374,24 @@ mod tests {
         let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
         let certificate = certify(&losses(&[0.0]), &[1.0], 0.0, alpha, alpha).unwrap();
         assert!(certificate.parameter);
+    }
+
+    /// Regression: retyping `Diagnostics::risk_adjusted_evalue` from
+    /// `Option<f64>` to `Option<EValue>` (to make weighted MDR's
+    /// `+infinity` case serde-safe) must not break the unweighted
+    /// `certify` path, which always produces `EValue::Finite`.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn unweighted_certificate_serde_round_trip_is_unaffected() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+        let certificate = certify(&losses(&[0.0]), &[1.0], 0.0, alpha, alpha).unwrap();
+        assert_eq!(
+            certificate.diagnostics.risk_adjusted_evalue,
+            Some(finite(2.0))
+        );
+        let json = serde_json::to_string(&certificate).unwrap();
+        let restored: RiskCertificate<bool> = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, certificate);
     }
 
     #[test]
@@ -252,5 +475,438 @@ mod tests {
 
             proptest::prop_assert_eq!(certificate.parameter, shortcut_deploy);
         }
+    }
+
+    fn weights(values: &[f64]) -> Vec<NonNegative> {
+        values
+            .iter()
+            .map(|&v| NonNegative::new("weight", v).unwrap())
+            .collect()
+    }
+
+    fn weight(v: f64) -> NonNegative {
+        NonNegative::new("weight", v).unwrap()
+    }
+
+    #[test]
+    fn weighted_rejects_mismatched_lengths() {
+        let alpha = OpenUnitInterval::new("alpha", 0.3).unwrap();
+        let err = certify_weighted(
+            &losses(&[1.0]),
+            &[0.0, 1.0],
+            &weights(&[1.0]),
+            0.5,
+            weight(1.0),
+            alpha,
+            alpha,
+            ImportanceWeightSource::KnownDensityRatio,
+        )
+        .unwrap_err();
+        assert!(matches!(err, RiskSieveError::AssumptionMismatch { .. }));
+    }
+
+    #[test]
+    fn weighted_rejects_degenerate_combined_weights() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+        let err = certify_weighted(
+            &losses(&[1.0]),
+            &[0.0],
+            &weights(&[0.0]),
+            0.0,
+            weight(0.0),
+            alpha,
+            alpha,
+            ImportanceWeightSource::KnownDensityRatio,
+        )
+        .unwrap_err();
+        assert!(matches!(err, RiskSieveError::DegenerateWeights));
+    }
+
+    // Same two `n=1` hand fixtures as `certify`'s own tests
+    // (`deploys_when_test_point_is_excluded_from_the_threshold` and
+    // `deploys_when_evalue_clears_the_threshold`), with every weight set
+    // to `1.0`: Equation 6.1 reduces algebraically to Equation 4.1 at
+    // uniform weight `1`, so the weighted decision must match the
+    // unweighted one exactly (see `evalue_weighted.rs`'s module docs).
+    #[test]
+    fn weighted_matches_unweighted_decision_when_all_weights_are_one() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+        let excluded = certify_weighted(
+            &losses(&[1.0]),
+            &[0.0],
+            &weights(&[1.0]),
+            1.0,
+            weight(1.0),
+            alpha,
+            alpha,
+            ImportanceWeightSource::KnownDensityRatio,
+        )
+        .unwrap();
+        assert!(!excluded.parameter);
+        assert_eq!(excluded.diagnostics.risk_adjusted_evalue, Some(finite(0.0)));
+
+        let cleared = certify_weighted(
+            &losses(&[0.0]),
+            &[1.0],
+            &weights(&[1.0]),
+            0.0,
+            weight(1.0),
+            alpha,
+            alpha,
+            ImportanceWeightSource::KnownDensityRatio,
+        )
+        .unwrap();
+        assert!(cleared.parameter);
+    }
+
+    #[test]
+    fn known_density_ratio_yields_marginal_deployment_risk() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+        let certificate = certify_weighted(
+            &losses(&[0.0]),
+            &[1.0],
+            &weights(&[1.0]),
+            0.0,
+            weight(1.0),
+            alpha,
+            alpha,
+            ImportanceWeightSource::KnownDensityRatio,
+        )
+        .unwrap();
+        assert_eq!(certificate.guarantee, GuaranteeKind::MarginalDeploymentRisk);
+        assert_eq!(
+            certificate.assumptions.shift,
+            ShiftAssumption::CovariateShift {
+                weight_source: ImportanceWeightSource::KnownDensityRatio
+            }
+        );
+    }
+
+    /// A `weight_source` declaring every one of Theorem 6.4's hypotheses
+    /// except `gamma == alpha`, which the caller must separately ensure by
+    /// passing the same value for both parameters.
+    fn fully_justified_estimated_weight_source() -> ImportanceWeightSource {
+        ImportanceWeightSource::Estimated {
+            method: "test fixture".to_string(),
+            training_data_separate_from_calibration: true,
+            consistency: WeightConsistencyEvidence::Asserted {
+                justification: "test fixture".to_string(),
+            },
+            threshold_regularity: ThresholdRegularityEvidence::Asserted {
+                justification: "test fixture".to_string(),
+            },
+        }
+    }
+
+    #[test]
+    fn estimated_weight_with_full_theorem_6_4_conditions_reaches_asymptotic() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+        let certificate = certify_weighted(
+            &losses(&[0.0]),
+            &[1.0],
+            &weights(&[1.0]),
+            0.0,
+            weight(1.0),
+            alpha,
+            alpha,
+            fully_justified_estimated_weight_source(),
+        )
+        .unwrap();
+        assert_eq!(certificate.guarantee, GuaranteeKind::Asymptotic);
+    }
+
+    #[test]
+    fn estimated_weight_without_independent_training_data_does_not_reach_asymptotic() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+        let weight_source = ImportanceWeightSource::Estimated {
+            method: "test fixture".to_string(),
+            training_data_separate_from_calibration: false,
+            consistency: WeightConsistencyEvidence::Asserted {
+                justification: "test fixture".to_string(),
+            },
+            threshold_regularity: ThresholdRegularityEvidence::Asserted {
+                justification: "test fixture".to_string(),
+            },
+        };
+        let certificate = certify_weighted(
+            &losses(&[0.0]),
+            &[1.0],
+            &weights(&[1.0]),
+            0.0,
+            weight(1.0),
+            alpha,
+            alpha,
+            weight_source,
+        )
+        .unwrap();
+        assert_eq!(certificate.guarantee, GuaranteeKind::EmpiricalOnly);
+    }
+
+    #[test]
+    fn estimated_weight_without_consistency_evidence_does_not_reach_asymptotic() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+        let weight_source = ImportanceWeightSource::Estimated {
+            method: "test fixture".to_string(),
+            training_data_separate_from_calibration: true,
+            consistency: WeightConsistencyEvidence::Unknown,
+            threshold_regularity: ThresholdRegularityEvidence::Asserted {
+                justification: "test fixture".to_string(),
+            },
+        };
+        let certificate = certify_weighted(
+            &losses(&[0.0]),
+            &[1.0],
+            &weights(&[1.0]),
+            0.0,
+            weight(1.0),
+            alpha,
+            alpha,
+            weight_source,
+        )
+        .unwrap();
+        assert_eq!(certificate.guarantee, GuaranteeKind::EmpiricalOnly);
+    }
+
+    #[test]
+    fn estimated_weight_without_threshold_regularity_evidence_does_not_reach_asymptotic() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+        let weight_source = ImportanceWeightSource::Estimated {
+            method: "test fixture".to_string(),
+            training_data_separate_from_calibration: true,
+            consistency: WeightConsistencyEvidence::Asserted {
+                justification: "test fixture".to_string(),
+            },
+            threshold_regularity: ThresholdRegularityEvidence::Unknown,
+        };
+        let certificate = certify_weighted(
+            &losses(&[0.0]),
+            &[1.0],
+            &weights(&[1.0]),
+            0.0,
+            weight(1.0),
+            alpha,
+            alpha,
+            weight_source,
+        )
+        .unwrap();
+        assert_eq!(certificate.guarantee, GuaranteeKind::EmpiricalOnly);
+    }
+
+    #[test]
+    fn estimated_weight_with_gamma_not_equal_alpha_does_not_reach_asymptotic() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+        let gamma = OpenUnitInterval::new("gamma", 0.4).unwrap();
+        let certificate = certify_weighted(
+            &losses(&[0.0]),
+            &[1.0],
+            &weights(&[1.0]),
+            0.0,
+            weight(1.0),
+            alpha,
+            gamma,
+            fully_justified_estimated_weight_source(),
+        )
+        .unwrap();
+        assert_eq!(certificate.guarantee, GuaranteeKind::EmpiricalOnly);
+    }
+
+    #[test]
+    fn weighted_records_weight_diagnostics() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+        let certificate = certify_weighted(
+            &losses(&[0.0, 1.0]),
+            &[1.0, 2.0],
+            &weights(&[1.0, 3.0]),
+            0.0,
+            weight(5.0),
+            alpha,
+            alpha,
+            ImportanceWeightSource::KnownDensityRatio,
+        )
+        .unwrap();
+        // weight_sum/weight_sum_of_squares/weight_range are calibration
+        // weights only (1.0, 3.0) -- the test point's weight (5.0) is not
+        // folded into them, and is instead recorded separately.
+        assert_eq!(certificate.diagnostics.weight_sum, Some(4.0));
+        assert_eq!(certificate.diagnostics.weight_sum_of_squares, Some(10.0));
+        assert_eq!(certificate.diagnostics.weight_range, Some((1.0, 3.0)));
+        assert_eq!(certificate.diagnostics.test_weight, Some(5.0));
+        assert_eq!(certificate.diagnostics.weight_sum_overflowed, Some(false));
+        assert_eq!(
+            certificate.diagnostics.weight_sum_of_squares_overflowed,
+            Some(false)
+        );
+    }
+
+    /// A raw-scale overflow in the calibration weight diagnostics must
+    /// never block `certify_weighted` itself: `risk_adjusted_evalue` is
+    /// computed independently, via its own normalization, and stays
+    /// exact regardless of what these diagnostics can represent.
+    #[test]
+    fn weighted_raw_scale_weight_diagnostics_overflow_is_explicit_not_silent() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+        let certificate = certify_weighted(
+            &losses(&[0.0, 0.0]),
+            &[1.0, 1.0],
+            &weights(&[f64::MAX, f64::MAX]),
+            1.0,
+            weight(1.0),
+            alpha,
+            alpha,
+            ImportanceWeightSource::KnownDensityRatio,
+        )
+        .unwrap();
+        assert_eq!(certificate.diagnostics.weight_sum, None);
+        assert_eq!(certificate.diagnostics.weight_sum_overflowed, Some(true));
+        assert_eq!(certificate.diagnostics.weight_sum_of_squares, None);
+        assert_eq!(
+            certificate.diagnostics.weight_sum_of_squares_overflowed,
+            Some(true)
+        );
+        assert!(certificate.diagnostics.risk_adjusted_evalue.is_some());
+    }
+
+    /// A single f64::MAX calibration weight has a representable raw sum
+    /// but not a representable raw sum of squares -- the two overflow
+    /// flags must be independent, not conflated into one.
+    #[test]
+    fn weighted_single_huge_weight_overflows_only_sum_of_squares() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+        let certificate = certify_weighted(
+            &losses(&[0.0]),
+            &[1.0],
+            &weights(&[f64::MAX]),
+            1.0,
+            weight(1.0),
+            alpha,
+            alpha,
+            ImportanceWeightSource::KnownDensityRatio,
+        )
+        .unwrap();
+        assert_eq!(certificate.diagnostics.weight_sum, Some(f64::MAX));
+        assert_eq!(certificate.diagnostics.weight_sum_overflowed, Some(false));
+        assert_eq!(certificate.diagnostics.weight_sum_of_squares, None);
+        assert_eq!(
+            certificate.diagnostics.weight_sum_of_squares_overflowed,
+            Some(true)
+        );
+    }
+
+    /// Regression fixtures from the review: an extreme weight ratio and
+    /// zero weights alongside a huge one must both still produce a
+    /// certificate (the overflow, where it occurs, is confined to the
+    /// diagnostics).
+    #[test]
+    fn weighted_overflow_regression_fixtures_still_certify() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+
+        let extreme_ratio = certify_weighted(
+            &losses(&[0.0, 0.0]),
+            &[1.0, 1.0],
+            &weights(&[1e-300, 1e300]),
+            1.0,
+            weight(1.0),
+            alpha,
+            alpha,
+            ImportanceWeightSource::KnownDensityRatio,
+        )
+        .unwrap();
+        assert!(extreme_ratio.diagnostics.weight_sum.unwrap().is_finite());
+        assert_eq!(
+            extreme_ratio.diagnostics.weight_sum_of_squares_overflowed,
+            Some(true)
+        );
+
+        let zeros_alongside_max = certify_weighted(
+            &losses(&[0.0, 0.0, 0.0]),
+            &[1.0, 1.0, 1.0],
+            &weights(&[0.0, 0.0, f64::MAX]),
+            1.0,
+            weight(1.0),
+            alpha,
+            alpha,
+            ImportanceWeightSource::KnownDensityRatio,
+        )
+        .unwrap();
+        assert_eq!(zeros_alongside_max.diagnostics.weight_sum, Some(f64::MAX));
+        assert_eq!(
+            zeros_alongside_max.diagnostics.weight_sum_overflowed,
+            Some(false)
+        );
+    }
+
+    /// Serde round-trip must keep "not computed" (unweighted `certify`,
+    /// which has no weight diagnostics at all) and "overflowed"
+    /// (`certify_weighted` with two f64::MAX calibration weights)
+    /// distinguishable, the same property already required of
+    /// `risk_adjusted_evalue`/`EValue`.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn weight_sum_overflow_and_not_computed_remain_distinct_after_serde_round_trip() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+
+        let not_computed = certify(&losses(&[0.0]), &[1.0], 0.0, alpha, alpha).unwrap();
+        assert_eq!(not_computed.diagnostics.weight_sum, None);
+        assert_eq!(not_computed.diagnostics.weight_sum_overflowed, None);
+
+        let overflowed = certify_weighted(
+            &losses(&[0.0, 0.0]),
+            &[1.0, 1.0],
+            &weights(&[f64::MAX, f64::MAX]),
+            1.0,
+            weight(1.0),
+            alpha,
+            alpha,
+            ImportanceWeightSource::KnownDensityRatio,
+        )
+        .unwrap();
+        assert_eq!(overflowed.diagnostics.weight_sum, None);
+        assert_eq!(overflowed.diagnostics.weight_sum_overflowed, Some(true));
+
+        let not_computed_json = serde_json::to_string(&not_computed).unwrap();
+        let overflowed_json = serde_json::to_string(&overflowed).unwrap();
+        let not_computed_restored: RiskCertificate<bool> =
+            serde_json::from_str(&not_computed_json).unwrap();
+        let overflowed_restored: RiskCertificate<bool> =
+            serde_json::from_str(&overflowed_json).unwrap();
+
+        assert_eq!(not_computed_restored.diagnostics.weight_sum, None);
+        assert_eq!(
+            not_computed_restored.diagnostics.weight_sum_overflowed,
+            None
+        );
+        assert_eq!(overflowed_restored.diagnostics.weight_sum, None);
+        assert_eq!(
+            overflowed_restored.diagnostics.weight_sum_overflowed,
+            Some(true)
+        );
+        assert_ne!(
+            not_computed_restored.diagnostics.weight_sum_overflowed,
+            overflowed_restored.diagnostics.weight_sum_overflowed
+        );
+    }
+
+    #[test]
+    fn weighted_exchangeability_is_covariate_shift_iid_not_plain_iid() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+        let certificate = certify_weighted(
+            &losses(&[0.0]),
+            &[1.0],
+            &weights(&[1.0]),
+            0.0,
+            weight(1.0),
+            alpha,
+            alpha,
+            ImportanceWeightSource::KnownDensityRatio,
+        )
+        .unwrap();
+        assert_eq!(
+            certificate.assumptions.exchangeability,
+            ExchangeabilityAssumption::CovariateShiftIid
+        );
+        assert_ne!(
+            certificate.assumptions.exchangeability,
+            ExchangeabilityAssumption::Iid
+        );
     }
 }

@@ -9,9 +9,10 @@
 単調CRC)、Milestone 3(非単調CRC、部分的)、Milestone 4(SCoRE-MDR、部分的)、
 Milestone 5(SCoRE-SDR)、Milestone 6(分布シフト、部分的)が完了。**
 Milestone 5には論文のオプション機能であるrandomized pruning(公式実装の
-`prune='hete'` / `'homo'`)とweighted SDRはまだ含まれていない — 詳細は
-下記のMilestone 5の段落と`docs/roadmap.md`を参照。Milestone 7(下流の実例)
-はまだ未実装。
+`prune='hete'` / `'homo'`)とweighted SDRはまだ含まれていない。Milestone 6は
+重要度重み付きanytime-valid CRCと重み付きSCoRE-MDRをカバーするが、weighted
+SDR(`SCoRE_SDR_w`)はまだ含まれていない — 詳細は下記のMilestone 5・6の段落と
+`docs/roadmap.md`を参照。Milestone 7(下流の実例)はまだ未実装。
 
 Milestone 0 で提供するもの:
 
@@ -84,9 +85,77 @@ m* は Milestone 2 のように事前計算できない — Theorem 4.7 の m* �
 条件が実現された重みに依存するためで、代わりに実行時に「停止時刻」として
 発見し、条件が最初に成立した時点で固定する。`weight_source` は必須で
 暗黙のデフォルトを持たないフィールドであり、`KnownDensityRatio` は
-有限サンプルの保証をフルに与えるが、`Estimated` は漸近的な保証に格下げ
-される — 論文が推定された重みについて有限サンプルの妥当性を示していない
-ため。重み付き SCoRE は見送った(`docs/roadmap.md` 参照)。
+有限サンプルの保証をフルに与えるが、`Estimated` は無条件に
+`EmpiricalOnly`(経験的診断のみ)へ格下げされる — 論文がそもそも
+推定された重みについて一切論じていない(既知のomegaを前提条件として
+扱うのみで、定理自身がそれを緩めることはない)ため、頼れる漸近的論拠が
+存在しない。
+
+Milestone 6 ではさらに、分布シフト下での重み付き SCoRE-MDR
+`risksieve::selective::evalue_weighted::weighted_risk_adjusted_evalue` と
+`risksieve::selective::mdr::certify_weighted` を追加した(Bai and Jin
+(2026) の Equation 6.1、Theorem 6.2・6.4)。`KnownDensityRatio` は
+`MarginalDeploymentRisk`(unweighted MDRと同じ有限サンプル保証)を返す。
+`Estimated` は、Theorem 6.4の4条件——calibrationから独立に学習された
+weight estimator、L2(P_X)一致性(`WeightConsistencyEvidence`)、論文の
+閾値関数の正則性(`ThresholdRegularityEvidence`)、そして`gamma == alpha`
+の厳密な一致——が**すべて**宣言された場合に限り`Asymptotic`を返し、
+一つでも欠ければ`EmpiricalOnly`へ格下げする。これは
+`risksieve::anytime::AnytimeShiftedController`(上記、無条件に
+`EmpiricalOnly`)よりも厳格な、定理ごとの個別判定である——根拠となる
+定理(Theorem 4.7)自体が推定weightの漸近論拠を持たないanytimeの場合と
+異なり、weighted MDRのTheorem 6.4には実際に(条件付きの)漸近論拠が
+存在するため。両コントローラとも
+`ExchangeabilityAssumption::CovariateShiftIid`(calibrationはP、testは
+異なるQからそれぞれi.i.d.)を記録する——両者とも実際には成立しない
+同一分布Iidとは異なる主張である。キャリブレーション点はテスト点だけで
+なく個別に重み付けされ(`w(X_i)`)、重みには正規化の要件がない — 全ての
+重み(キャリブレーションとテスト点)を同じ正の定数で一律にリスケール
+してもe値は不変だが、不均一な再重み付けに対しては不変ではなく、また
+巨大だが有限な重み(例えばf64::MAX付近)がオーバーフローしないよう、
+計算前に全重みをその最大値で正規化している。e値は、狭く非退化な特定の
+ケースで`f64::INFINITY`になり得る(oracle fixtureを生成する過程で
+見つかった具体的な事例であり、仮説上のものではない —
+`docs/references.md`の「Equation 6.1 audit」を参照)。これは大きな
+有限値へクランプするのではなく、専用の`EValue`型(`Finite(NonNegative)`
+/ `PositiveInfinity`)で表現している——この型は`certificate.rs`に
+定義されており、`Diagnostics::risk_adjusted_evalue`がserde機能下で
+`Finite`/`PositiveInfinity`/`None`を区別して往復できる。`Tian-Bai/SCoRE`
+自身の`SCoRE_MDR_w`との照合(38件のfixture、109テスト点、
+`tests/score_mdr_w_oracle.rs` — 公式パッケージには重み付きe値関数自体が
+存在しないため、1件につき2種類の独立した比較を実施。公式判定は
+gammaとalphaの大小に関わらず全ケースで厳密一致を検証しており、これは
+仮定ではなく30万試行のランダム探索で確認済み)と、重み付きMDR保証その
+もののモンテカルロ・シミュレーション
+(`tests/statistical_validity_weighted_mdr.rs`)で検証している。weighted
+SDR は見送った(`docs/roadmap.md` 参照)。
+
+その後のレビューラウンドで、この Milestone の数値まわりをさらに堅牢化
+した。`WeightAccumulator::update`(`AnytimeShiftedController`が使用)は
+`Result`を返すようになり、重みの二乗・累積和・二乗和・実効サンプル
+サイズのいずれかが非有限へオーバーフローする更新を拒否する。かつ
+完全にトランザクショナルである——候補値をすべてローカルで計算してから
+コミットするため、拒否された更新がaccumulatorを部分的に変更することは
+ない。`AnytimeShiftedController::update`自体も端から端までトランザク
+ショナルになった(重みの蓄積・損失評価・派生する補正項`gamma_n`のすべて
+をローカル候補として計算してから`self`へコミットする)。オーバーフロー
+時は`gamma_n`が`inf`/`NaN`の証明書を返すことは決してなく、代わりに
+`RiskSieveError::NumericalOverflow`で更新自体を拒否する。一方
+`certify_weighted`のcalibration weight診断は、決して失敗しない別の
+scale-safeなヘルパー`shift::importance::WeightSummary`を使う——
+`weighted_risk_adjusted_evalue`自体は既に共有最大値で正規化して厳密な
+まま保たれるため、`weight_sum`/`weight_sum_of_squares`の診断のみの
+オーバーフローが呼び出し自体をブロックしてはならない(anytime
+controllerの保証計算そのものを担うaccumulatorのオーバーフローとは
+事情が異なる)。新設の
+`Diagnostics::weight_sum_overflowed`/`weight_sum_of_squares_overflowed`
+フィールドがこの区別を明示する(`Some(true)`は該当フィールドが
+「未計算」ではなく「オーバーフローしたから」`None`であることを示す)
+——`risk_adjusted_evalue`に対する`EValue`と同種のserde安全性の修正で
+ある。上記の30万試行`gamma > alpha`監査は
+`scripts/audits/compare_score_mdr_w.py --repo /path/to/Tian-Bai/SCoRE`
+により第三者が再現可能になった。正確なコマンドと再現された件数は
+`docs/references.md`の「Equation 6.1 audit」を参照。
 
 実装の全体シーケンスは `AGENTS.md` の第7章、現時点でのテスト範囲は
 `docs/validation.md` を参照。

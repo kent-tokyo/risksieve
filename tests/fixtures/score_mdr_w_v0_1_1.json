@@ -1,0 +1,1531 @@
+{
+  "provenance": {
+    "repository": "https://github.com/Tian-Bai/SCoRE",
+    "license": "MIT",
+    "license_copyright": "Copyright (c) 2026 Tian Bai and Ying Jin",
+    "commit_sha": "401b7caf6d030825ff67e8f08e44ba15ee8c94af",
+    "score_py_blob_sha": "aa9d111b92fcf574b77f232039410e8a4c23f3f5",
+    "package_version": "0.1.1",
+    "imported_score_py_path": "SCoRE/SCoRE.py",
+    "generator_seed": 20260730,
+    "generated_date": "2026-07-30",
+    "generator_script": "scripts/oracles/generate_score_mdr_w.py",
+    "notes": "official_selected_indices comes from SCoRE_MDR_w and is asserted exactly for every case (gamma_le_alpha is descriptive metadata only, not a gate -- see the module docs for the 300,000-trial search backing this). reference_evalues comes from this script's own from-scratch breakpoint-enumeration implementation of Equation 6.1, NOT from an official function (no official weighted brute-force e-value function exists) and NOT derived from src/selective/evalue_weighted.rs -- see docs/references.md."
+  },
+  "cases": [
+    {
+      "calibration_losses": [
+        1.0,
+        0.0,
+        1.0
+      ],
+      "calibration_scores": [
+        0.0,
+        1.0,
+        2.0
+      ],
+      "calibration_weights": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "test_scores": [
+        -1.0,
+        1.5
+      ],
+      "test_weights": [
+        1.0,
+        1.0
+      ],
+      "alpha": 0.5,
+      "gamma": 0.5,
+      "reference_evalues": [
+        2.0,
+        2.0
+      ],
+      "official_selected_indices": [
+        0,
+        1
+      ],
+      "gamma_le_alpha": true,
+      "name": "all_weights_one_matches_unweighted",
+      "description": "Every calibration and test weight is 1.0; the weighted e-value must equal the unweighted Equation 4.1 construction exactly."
+    },
+    {
+      "calibration_losses": [
+        1.0,
+        0.0,
+        1.0
+      ],
+      "calibration_scores": [
+        0.0,
+        1.0,
+        2.0
+      ],
+      "calibration_weights": [
+        3.0,
+        0.5,
+        2.0
+      ],
+      "test_scores": [
+        -1.0,
+        1.5
+      ],
+      "test_weights": [
+        1.0,
+        1.0
+      ],
+      "alpha": 0.5,
+      "gamma": 0.5,
+      "reference_evalues": [
+        2.0,
+        0.0
+      ],
+      "official_selected_indices": [
+        0
+      ],
+      "gamma_le_alpha": true,
+      "name": "calibration_weights_only_non_uniform",
+      "description": "Test weight fixed at 1.0; calibration weights vary."
+    },
+    {
+      "calibration_losses": [
+        1.0,
+        0.0,
+        1.0
+      ],
+      "calibration_scores": [
+        0.0,
+        1.0,
+        2.0
+      ],
+      "calibration_weights": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "test_scores": [
+        -1.0,
+        1.5,
+        3.0
+      ],
+      "test_weights": [
+        0.2,
+        5.0,
+        1.0
+      ],
+      "alpha": 0.5,
+      "gamma": 0.5,
+      "reference_evalues": [
+        2.666666666666667,
+        0.0,
+        0.0
+      ],
+      "official_selected_indices": [
+        0
+      ],
+      "gamma_le_alpha": true,
+      "name": "test_weights_only_non_uniform",
+      "description": "Calibration weights fixed at 1.0; test weights vary per point."
+    },
+    {
+      "calibration_losses": [
+        0.3,
+        0.7,
+        0.1,
+        1.0
+      ],
+      "calibration_scores": [
+        -2.0,
+        0.5,
+        1.0,
+        3.0
+      ],
+      "calibration_weights": [
+        2.0,
+        0.5,
+        4.0,
+        1.0
+      ],
+      "test_scores": [
+        -1.0,
+        0.75,
+        2.0
+      ],
+      "test_weights": [
+        3.0,
+        0.1,
+        2.0
+      ],
+      "alpha": 0.4,
+      "gamma": 0.4,
+      "reference_evalues": [
+        2.5,
+        3.10204081632653,
+        2.5
+      ],
+      "official_selected_indices": [
+        0,
+        1,
+        2
+      ],
+      "gamma_le_alpha": true,
+      "name": "both_non_uniform",
+      "description": "Calibration and test weights both vary."
+    },
+    {
+      "calibration_losses": [
+        1.0,
+        0.0
+      ],
+      "calibration_scores": [
+        0.0,
+        1.0
+      ],
+      "calibration_weights": [
+        0.0,
+        1.0
+      ],
+      "test_scores": [
+        -1.0,
+        0.0
+      ],
+      "test_weights": [
+        1.0,
+        0.0
+      ],
+      "alpha": 0.5,
+      "gamma": 0.5,
+      "reference_evalues": [
+        2.0,
+        "Infinity"
+      ],
+      "official_selected_indices": [
+        0,
+        1
+      ],
+      "gamma_le_alpha": true,
+      "name": "zero_weights",
+      "description": "One calibration weight and one test weight are exactly zero."
+    },
+    {
+      "calibration_losses": [
+        0.5,
+        0.2,
+        0.9
+      ],
+      "calibration_scores": [
+        1.0,
+        1.0,
+        -1.0
+      ],
+      "calibration_weights": [
+        2.0,
+        3.0,
+        1.0
+      ],
+      "test_scores": [
+        1.0,
+        2.0
+      ],
+      "test_weights": [
+        1.0,
+        1.0
+      ],
+      "alpha": 0.6,
+      "gamma": 0.6,
+      "reference_evalues": [
+        2.0,
+        2.0
+      ],
+      "official_selected_indices": [
+        0,
+        1
+      ],
+      "gamma_le_alpha": true,
+      "name": "calibration_score_ties",
+      "description": "Two calibration points tied at the same score with different weights and losses."
+    },
+    {
+      "calibration_losses": [
+        0.3,
+        0.6,
+        0.1
+      ],
+      "calibration_scores": [
+        -1.0,
+        0.0,
+        1.0
+      ],
+      "calibration_weights": [
+        2.0,
+        2.0,
+        2.0
+      ],
+      "test_scores": [
+        -0.5,
+        0.5
+      ],
+      "test_weights": [
+        2.0,
+        2.0
+      ],
+      "alpha": 0.5,
+      "gamma": 0.5,
+      "reference_evalues": [
+        2.0,
+        2.0
+      ],
+      "official_selected_indices": [
+        0,
+        1
+      ],
+      "gamma_le_alpha": true,
+      "name": "weight_ties",
+      "description": "Calibration points with identical weight values at distinct scores."
+    },
+    {
+      "calibration_losses": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "calibration_scores": [
+        -1.0,
+        0.0,
+        1.0
+      ],
+      "calibration_weights": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "test_scores": [
+        -0.5,
+        0.5,
+        2.0
+      ],
+      "test_weights": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "alpha": 0.5,
+      "gamma": 0.3,
+      "reference_evalues": [
+        7.000000000000001,
+        7.000000000000001,
+        7.000000000000001
+      ],
+      "official_selected_indices": [
+        0,
+        1,
+        2
+      ],
+      "gamma_le_alpha": true,
+      "name": "all_zero_losses",
+      "description": "Calibration loss is 0 everywhere."
+    },
+    {
+      "calibration_losses": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "calibration_scores": [
+        -1.0,
+        0.0,
+        1.0
+      ],
+      "calibration_weights": [
+        1.0,
+        2.0,
+        3.0
+      ],
+      "test_scores": [
+        -0.5,
+        0.5,
+        2.0
+      ],
+      "test_weights": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "alpha": 0.9,
+      "gamma": 0.9,
+      "reference_evalues": [
+        1.1111111111111112,
+        1.1111111111111112,
+        0.0
+      ],
+      "official_selected_indices": [
+        0,
+        1
+      ],
+      "gamma_le_alpha": true,
+      "name": "all_one_losses",
+      "description": "Calibration loss is 1 (the loss upper bound) everywhere."
+    },
+    {
+      "calibration_losses": [
+        1.0,
+        0.0
+      ],
+      "calibration_scores": [
+        0.0,
+        1.0
+      ],
+      "calibration_weights": [
+        1.0,
+        1.0
+      ],
+      "test_scores": [],
+      "test_weights": [],
+      "alpha": 0.5,
+      "gamma": 0.5,
+      "reference_evalues": [],
+      "official_selected_indices": [],
+      "gamma_le_alpha": true,
+      "name": "empty_test_batch",
+      "description": "No test points at all; must not error and must select nothing."
+    },
+    {
+      "calibration_losses": [
+        1.0
+      ],
+      "calibration_scores": [
+        0.0
+      ],
+      "calibration_weights": [
+        1.0
+      ],
+      "test_scores": [
+        0.0,
+        0.0
+      ],
+      "test_weights": [
+        1.0,
+        1.0
+      ],
+      "alpha": 0.5,
+      "gamma": 1e-06,
+      "reference_evalues": [
+        0.0,
+        0.0
+      ],
+      "official_selected_indices": [],
+      "gamma_le_alpha": true,
+      "name": "zero_selections",
+      "description": "gamma too strict for any threshold to be feasible; every e-value is 0."
+    },
+    {
+      "calibration_losses": [
+        0.0,
+        0.0
+      ],
+      "calibration_scores": [
+        -1.0,
+        1.0
+      ],
+      "calibration_weights": [
+        1.0,
+        1.0
+      ],
+      "test_scores": [
+        -2.0,
+        -1.5,
+        0.0,
+        1.5,
+        2.0
+      ],
+      "test_weights": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "alpha": 0.9,
+      "gamma": 0.9,
+      "reference_evalues": [
+        3.0,
+        3.0,
+        3.0,
+        3.0,
+        3.0
+      ],
+      "official_selected_indices": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "gamma_le_alpha": true,
+      "name": "all_selected",
+      "description": "Zero calibration loss and a generous gamma/alpha make every test point's e-value clear the deployment threshold."
+    },
+    {
+      "calibration_losses": [
+        1.0,
+        1.0
+      ],
+      "calibration_scores": [
+        0.0,
+        1.0
+      ],
+      "calibration_weights": [
+        1e-100,
+        1e+100
+      ],
+      "test_scores": [
+        0.5,
+        1.5
+      ],
+      "test_weights": [
+        1.0,
+        1.0
+      ],
+      "alpha": 0.5,
+      "gamma": 0.5,
+      "reference_evalues": [
+        1e+100,
+        0.0
+      ],
+      "official_selected_indices": [
+        0
+      ],
+      "gamma_le_alpha": true,
+      "name": "extreme_weight_ratio",
+      "description": "Calibration weights span 1e-100 to 1e100."
+    },
+    {
+      "calibration_losses": [
+        0.3,
+        0.7,
+        0.1,
+        1.0
+      ],
+      "calibration_scores": [
+        -2.0,
+        0.5,
+        1.0,
+        3.0
+      ],
+      "calibration_weights": [
+        20.0,
+        5.0,
+        40.0,
+        10.0
+      ],
+      "test_scores": [
+        -1.0,
+        0.75,
+        2.0
+      ],
+      "test_weights": [
+        30.0,
+        1.0,
+        20.0
+      ],
+      "alpha": 0.4,
+      "gamma": 0.4,
+      "reference_evalues": [
+        2.5,
+        3.10204081632653,
+        2.5
+      ],
+      "official_selected_indices": [
+        0,
+        1,
+        2
+      ],
+      "gamma_le_alpha": true,
+      "name": "uniform_weight_rescale_of_both_non_uniform",
+      "description": "Same losses/scores as both_non_uniform, all weights (calibration and test) scaled by a common factor of 10 -- e-values must match both_non_uniform's exactly."
+    },
+    {
+      "calibration_losses": [
+        0.3,
+        0.7,
+        0.1
+      ],
+      "calibration_scores": [
+        -1.0,
+        0.5,
+        2.0
+      ],
+      "calibration_weights": [
+        1.0,
+        2.0,
+        1.0
+      ],
+      "test_scores": [
+        -0.5,
+        1.0
+      ],
+      "test_weights": [
+        1.0,
+        1.0
+      ],
+      "alpha": 0.3,
+      "gamma": 0.7,
+      "reference_evalues": [
+        1.7857142857142858,
+        1.7857142857142858
+      ],
+      "official_selected_indices": [],
+      "gamma_le_alpha": false,
+      "name": "gamma_greater_than_alpha",
+      "description": "gamma > alpha, an ordinary case (not specifically constructed to hit the official shortcut's overlap-condition branch -- see the two cases below for that)."
+    },
+    {
+      "calibration_losses": [
+        0.725125329001105
+      ],
+      "calibration_scores": [
+        0.0
+      ],
+      "calibration_weights": [
+        1.2298464843571495
+      ],
+      "test_scores": [
+        -2.0
+      ],
+      "test_weights": [
+        1.2062389811562135
+      ],
+      "alpha": 0.5691805485405582,
+      "gamma": 0.7663917965294424,
+      "reference_evalues": [
+        1.304815636764952
+      ],
+      "official_selected_indices": [],
+      "gamma_le_alpha": false,
+      "name": "gamma_greater_than_alpha_overlap_condition_flips_to_abstain",
+      "description": "gamma > alpha; the official shortcut's naive check alone would deploy, but its overlap condition correctly flips this to abstain -- and the true e-value (computed by this script's breakpoint enumeration, independent of the shortcut) confirms abstain is correct: ~1.3048 < 1/alpha ~1.7569."
+    },
+    {
+      "calibration_losses": [
+        0.13
+      ],
+      "calibration_scores": [
+        1.0
+      ],
+      "calibration_weights": [
+        2.53
+      ],
+      "test_scores": [
+        1.0
+      ],
+      "test_weights": [
+        2.17
+      ],
+      "alpha": 0.57,
+      "gamma": 0.83,
+      "reference_evalues": [
+        1.8808275641282162
+      ],
+      "official_selected_indices": [
+        0
+      ],
+      "gamma_le_alpha": false,
+      "name": "gamma_greater_than_alpha_overlap_condition_does_not_flip",
+      "description": "gamma > alpha; the official shortcut's naive check deploys and the overlap condition does not flip it -- confirms this fixture exercises both outcomes of the shortcut's gamma > alpha branch, not only the one where it changes the decision."
+    },
+    {
+      "calibration_losses": [
+        0.0
+      ],
+      "calibration_scores": [
+        1.0
+      ],
+      "calibration_weights": [
+        1.7976931348623157e+308
+      ],
+      "test_scores": [
+        1.0
+      ],
+      "test_weights": [
+        1.7976931348623157e+308
+      ],
+      "alpha": 0.5,
+      "gamma": 0.5,
+      "reference_evalues": [
+        2.0
+      ],
+      "official_selected_indices": [
+        0
+      ],
+      "gamma_le_alpha": true,
+      "name": "overflow_adversarial_weights_near_f64_max",
+      "description": "Calibration and test weights both near f64::MAX; the true e-value is finite (2.0) once the shared scale is factored out, but computing at the raw scale would overflow to +infinity."
+    },
+    {
+      "calibration_losses": [
+        0.9917322567679385,
+        0.36065445512774796,
+        0.0782387089150911,
+        0.6526101288482281,
+        0.005415976931448241,
+        0.6125694207657709,
+        0.4230284531819235
+      ],
+      "calibration_scores": [
+        0.0,
+        2.0,
+        -2.0,
+        1.0,
+        1.0,
+        -2.0,
+        -1.0
+      ],
+      "calibration_weights": [
+        1.052904427880629,
+        3.7053808957870418,
+        9.835468806612488,
+        3.813716032337544,
+        3.5858514621852966,
+        7.720605061004988,
+        1.8138889424484677
+      ],
+      "test_scores": [
+        1.0,
+        1.0,
+        -2.0,
+        -1.0,
+        0.0
+      ],
+      "test_weights": [
+        2.9867656729724215,
+        1.545242096185053,
+        0.6846175909149639,
+        0.5998377878836756,
+        7.808083494657576
+      ],
+      "alpha": 0.3944233238298769,
+      "gamma": 0.16604652204246884,
+      "reference_evalues": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "official_selected_indices": [],
+      "gamma_le_alpha": true,
+      "name": "random_seed_20260730_index_0",
+      "description": "Randomized fixture #0 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
+    },
+    {
+      "calibration_losses": [
+        0.08197744076881053,
+        0.31080502441016966,
+        0.4123785884002208,
+        0.9654351762412325,
+        0.6833276297098927,
+        0.9675288433429732,
+        0.8954892407511313
+      ],
+      "calibration_scores": [
+        2.000717904446537,
+        2.006569579424591,
+        -0.9183408256262191,
+        2.1477656879237568,
+        2.9532122866835016,
+        -0.1273746856756639,
+        1.1681848016488416
+      ],
+      "calibration_weights": [
+        2.9665441527773804,
+        8.816044069685736,
+        4.27615857754581,
+        5.934409485468381,
+        0.7355839520475507,
+        0.8929177991714006,
+        4.5250554749397995
+      ],
+      "test_scores": [
+        2.3529563745235995,
+        -1.7269436048582085
+      ],
+      "test_weights": [
+        2.204690006905398,
+        6.3275514740456105
+      ],
+      "alpha": 0.9437271577860944,
+      "gamma": 0.9031977666471891,
+      "reference_evalues": [
+        1.6769341353942653,
+        1.551343271515887
+      ],
+      "official_selected_indices": [
+        0,
+        1
+      ],
+      "gamma_le_alpha": true,
+      "name": "random_seed_20260730_index_1",
+      "description": "Randomized fixture #1 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
+    },
+    {
+      "calibration_losses": [
+        0.6806795555674265,
+        0.5503742438326426,
+        0.350700419416178,
+        0.7336425539951518,
+        0.43559911756381453,
+        0.06010322984309979
+      ],
+      "calibration_scores": [
+        -2.0,
+        -2.0,
+        2.0,
+        -2.0,
+        -2.0,
+        1.0
+      ],
+      "calibration_weights": [
+        3.2289815771899426,
+        7.94110870638606,
+        7.353981430552225,
+        9.883052060236206,
+        3.723104823798518,
+        0.6750343035548476
+      ],
+      "test_scores": [
+        1.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "test_weights": [
+        6.824511628696819,
+        6.326808321681781,
+        2.9785187943498226,
+        0.8930622332494894
+      ],
+      "alpha": 0.9136148365055475,
+      "gamma": 0.15002299678611025,
+      "reference_evalues": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "official_selected_indices": [],
+      "gamma_le_alpha": true,
+      "name": "random_seed_20260730_index_2",
+      "description": "Randomized fixture #2 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
+    },
+    {
+      "calibration_losses": [
+        0.25780385357377267
+      ],
+      "calibration_scores": [
+        -1.3858049521797289
+      ],
+      "calibration_weights": [
+        7.074813045186867
+      ],
+      "test_scores": [
+        -2.179297527559001,
+        0.6323800384345117,
+        1.934167911222926,
+        2.8692175670095565
+      ],
+      "test_weights": [
+        5.901034092245684,
+        9.112793714742944,
+        7.7062829835866875,
+        5.72778712618454
+      ],
+      "alpha": 0.18492838247208265,
+      "gamma": 0.04832795350487182,
+      "reference_evalues": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "official_selected_indices": [],
+      "gamma_le_alpha": true,
+      "name": "random_seed_20260730_index_3",
+      "description": "Randomized fixture #3 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
+    },
+    {
+      "calibration_losses": [
+        0.4383750293945339,
+        0.784024786097175,
+        0.32014586708408876
+      ],
+      "calibration_scores": [
+        -2.0,
+        1.0,
+        1.0
+      ],
+      "calibration_weights": [
+        9.228582038010897,
+        5.906933763615814,
+        1.6658068815590594
+      ],
+      "test_scores": [
+        -1.0,
+        0.0,
+        -2.0,
+        -1.0,
+        1.0
+      ],
+      "test_weights": [
+        6.214751477470801,
+        7.139162767330288,
+        0.7816692780151661,
+        7.063734666574143,
+        0.07526229242863984
+      ],
+      "alpha": 0.09164097740111246,
+      "gamma": 0.028677121470303178,
+      "reference_evalues": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "official_selected_indices": [],
+      "gamma_le_alpha": true,
+      "name": "random_seed_20260730_index_4",
+      "description": "Randomized fixture #4 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
+    },
+    {
+      "calibration_losses": [
+        0.5158042009427697,
+        0.2117076507668706,
+        0.051664745398355194,
+        0.46422399613534004,
+        0.8318887643951617
+      ],
+      "calibration_scores": [
+        1.9250014367503698,
+        -0.9564417611308267,
+        -0.25415170545425614,
+        0.8545536298445278,
+        1.1565042946396198
+      ],
+      "calibration_weights": [
+        9.907323372132868,
+        4.033344072384398,
+        3.192666296905239,
+        8.50704428864052,
+        2.6407549554955208
+      ],
+      "test_scores": [
+        -0.028801221023242007,
+        1.5740190928310087,
+        -0.3045902113925991
+      ],
+      "test_weights": [
+        0.1665370367789745,
+        7.767848698707076,
+        9.838628904119057
+      ],
+      "alpha": 0.11886302514435489,
+      "gamma": 0.03393410082566737,
+      "reference_evalues": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "official_selected_indices": [],
+      "gamma_le_alpha": true,
+      "name": "random_seed_20260730_index_5",
+      "description": "Randomized fixture #5 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
+    },
+    {
+      "calibration_losses": [
+        0.0996482744979954,
+        0.1577040499332345,
+        0.16488556914513108,
+        0.8137780587087013
+      ],
+      "calibration_scores": [
+        -1.0,
+        0.0,
+        1.0,
+        1.0
+      ],
+      "calibration_weights": [
+        2.061595424809272,
+        4.57083003424708,
+        5.004238698977112,
+        7.202641008922514
+      ],
+      "test_scores": [
+        -1.0,
+        2.0,
+        -2.0,
+        1.0,
+        1.0
+      ],
+      "test_weights": [
+        6.47748383529538,
+        1.3542104737278577,
+        3.083414860586754,
+        3.18215536260684,
+        2.6998786204680565
+      ],
+      "alpha": 0.1360896965180155,
+      "gamma": 0.3033506809336716,
+      "reference_evalues": [
+        3.2965147693822137,
+        0.0,
+        5.467438287781222,
+        0.0,
+        0.0
+      ],
+      "official_selected_indices": [],
+      "gamma_le_alpha": false,
+      "name": "random_seed_20260730_index_6",
+      "description": "Randomized fixture #6 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
+    },
+    {
+      "calibration_losses": [
+        0.08313798430357366,
+        0.6053288367174547
+      ],
+      "calibration_scores": [
+        1.8443279103365733,
+        1.0736739365093313
+      ],
+      "calibration_weights": [
+        8.071966088526091,
+        6.719189711885643
+      ],
+      "test_scores": [
+        0.3854414015015726,
+        2.133632133348504,
+        2.8378368639113045,
+        2.694248457697728,
+        -1.3625075168372252
+      ],
+      "test_weights": [
+        8.749959341527246,
+        2.723721213785528,
+        4.308525887758171,
+        7.172929590179616,
+        9.06489031949521
+      ],
+      "alpha": 0.32693515628333275,
+      "gamma": 0.6878751355288878,
+      "reference_evalues": [
+        1.7452904079772642,
+        2.347169359437365,
+        2.1111777263157507,
+        1.843964910937474,
+        1.7282861340105726
+      ],
+      "official_selected_indices": [],
+      "gamma_le_alpha": false,
+      "name": "random_seed_20260730_index_7",
+      "description": "Randomized fixture #7 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
+    },
+    {
+      "calibration_losses": [
+        0.28437756583032225,
+        0.3609863957375823,
+        0.6965728787772972,
+        0.8773903155244979,
+        0.8279832395770544,
+        0.1985567107497116,
+        0.5692279002149087
+      ],
+      "calibration_scores": [
+        -1.0,
+        -2.0,
+        -1.0,
+        -1.0,
+        -1.0,
+        2.0,
+        1.0
+      ],
+      "calibration_weights": [
+        3.585983705196757,
+        5.537532013591585,
+        6.396276075226051,
+        0.030402903674649075,
+        3.8852807163489946,
+        4.206179745140456,
+        9.093969952380913
+      ],
+      "test_scores": [
+        2.0,
+        -2.0,
+        -2.0
+      ],
+      "test_weights": [
+        8.970485350093522,
+        1.9309743939651982,
+        3.54310346924988
+      ],
+      "alpha": 0.3546107110200323,
+      "gamma": 0.31988486471603356,
+      "reference_evalues": [
+        0.0,
+        3.1261247726981845,
+        3.126124772698185
+      ],
+      "official_selected_indices": [
+        1,
+        2
+      ],
+      "gamma_le_alpha": true,
+      "name": "random_seed_20260730_index_8",
+      "description": "Randomized fixture #8 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
+    },
+    {
+      "calibration_losses": [
+        0.30033630581402093
+      ],
+      "calibration_scores": [
+        1.4687546304032553
+      ],
+      "calibration_weights": [
+        9.761263260722393
+      ],
+      "test_scores": [
+        -0.3102940735466364
+      ],
+      "test_weights": [
+        2.9958104443013513
+      ],
+      "alpha": 0.25273393101819824,
+      "gamma": 0.18650135449106525,
+      "reference_evalues": [
+        0.0
+      ],
+      "official_selected_indices": [],
+      "gamma_le_alpha": true,
+      "name": "random_seed_20260730_index_9",
+      "description": "Randomized fixture #9 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
+    },
+    {
+      "calibration_losses": [
+        0.650036742673158,
+        0.7104989257069133,
+        0.4146064681493187,
+        0.8887926219375939,
+        0.7313409688058534
+      ],
+      "calibration_scores": [
+        -2.0,
+        0.0,
+        -1.0,
+        0.0,
+        -1.0
+      ],
+      "calibration_weights": [
+        2.8819729096369953,
+        8.705663345407766,
+        5.6977915033320405,
+        2.5329603859115553,
+        8.320244498528345
+      ],
+      "test_scores": [
+        1.0,
+        -2.0,
+        0.0,
+        2.0,
+        2.0
+      ],
+      "test_weights": [
+        8.734118314713271,
+        4.114245824796776,
+        5.600933258329638,
+        2.8862263267303008,
+        9.836322629513162
+      ],
+      "alpha": 0.2596467823989941,
+      "gamma": 0.30988126291011936,
+      "reference_evalues": [
+        0.0,
+        5.386581392387718,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "official_selected_indices": [
+        1
+      ],
+      "gamma_le_alpha": false,
+      "name": "random_seed_20260730_index_10",
+      "description": "Randomized fixture #10 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
+    },
+    {
+      "calibration_losses": [
+        0.011261270567799797,
+        0.9821918186081191,
+        0.9723776570162904,
+        0.7637233732918457,
+        0.35018378289538876,
+        0.5981657199420041,
+        0.8689234141905047
+      ],
+      "calibration_scores": [
+        2.925116708441674,
+        0.4612779834476779,
+        -2.0764196080406063,
+        0.07932807729629521,
+        -2.820735225801323,
+        1.6879594459430614,
+        1.6966242147288757
+      ],
+      "calibration_weights": [
+        2.7150474969719434,
+        2.450973163201835,
+        1.9974202848104916,
+        9.579123890423814,
+        4.357235165638247,
+        1.4811448538825425,
+        8.44602738444086
+      ],
+      "test_scores": [
+        0.16327877578701688,
+        2.7374650088035173
+      ],
+      "test_weights": [
+        0.5661879695816067,
+        0.35753723488344596
+      ],
+      "alpha": 0.14076317471138053,
+      "gamma": 0.2806523876540679,
+      "reference_evalues": [
+        0.0,
+        0.0
+      ],
+      "official_selected_indices": [],
+      "gamma_le_alpha": false,
+      "name": "random_seed_20260730_index_11",
+      "description": "Randomized fixture #11 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
+    },
+    {
+      "calibration_losses": [
+        0.2943248356739232
+      ],
+      "calibration_scores": [
+        -2.0
+      ],
+      "calibration_weights": [
+        4.360762890991324
+      ],
+      "test_scores": [
+        -1.0,
+        2.0
+      ],
+      "test_weights": [
+        9.846869903791562,
+        1.69595679352928
+      ],
+      "alpha": 0.5172726279305894,
+      "gamma": 0.3963924920710152,
+      "reference_evalues": [
+        0.0,
+        0.0
+      ],
+      "official_selected_indices": [],
+      "gamma_le_alpha": true,
+      "name": "random_seed_20260730_index_12",
+      "description": "Randomized fixture #12 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
+    },
+    {
+      "calibration_losses": [
+        0.8435870879674725,
+        0.2925187469723469,
+        0.4908119388160539,
+        0.37797198635105667
+      ],
+      "calibration_scores": [
+        -2.7196801584277015,
+        -0.07415432446985903,
+        -2.3388891342528817,
+        -1.8306461665947193
+      ],
+      "calibration_weights": [
+        2.578798858994541,
+        8.069971731391226,
+        4.648602375625669,
+        9.461648249236482
+      ],
+      "test_scores": [
+        -2.6111808933368588,
+        1.5553084105793848,
+        1.0741163903447883,
+        0.8249805303862985,
+        -2.770781221406118
+      ],
+      "test_weights": [
+        9.890313000691139,
+        5.797438494875712,
+        3.611461298493818,
+        0.8135900750936368,
+        2.410063575436329
+      ],
+      "alpha": 0.7573779892275585,
+      "gamma": 0.15089092485958058,
+      "reference_evalues": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        6.627303801939063
+      ],
+      "official_selected_indices": [
+        4
+      ],
+      "gamma_le_alpha": true,
+      "name": "random_seed_20260730_index_13",
+      "description": "Randomized fixture #13 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
+    },
+    {
+      "calibration_losses": [
+        0.32173677291923497,
+        0.33732562335305627,
+        0.09714616078165117,
+        0.4193914923715547,
+        0.3613117645874736
+      ],
+      "calibration_scores": [
+        -2.0,
+        0.0,
+        2.0,
+        -1.0,
+        -1.0
+      ],
+      "calibration_weights": [
+        3.526371777583105,
+        6.6084787120354225,
+        8.841393777158402,
+        1.0839048361976333,
+        5.6511619708464425
+      ],
+      "test_scores": [
+        2.0
+      ],
+      "test_weights": [
+        3.073973493995714
+      ],
+      "alpha": 0.21012152970812958,
+      "gamma": 0.29482533341400896,
+      "reference_evalues": [
+        0.0
+      ],
+      "official_selected_indices": [],
+      "gamma_le_alpha": false,
+      "name": "random_seed_20260730_index_14",
+      "description": "Randomized fixture #14 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
+    },
+    {
+      "calibration_losses": [
+        0.9064883416558689,
+        0.1675220975681011
+      ],
+      "calibration_scores": [
+        -1.3607206635710882,
+        -0.4987544099276684
+      ],
+      "calibration_weights": [
+        2.5228077801867914,
+        0.9211009813053617
+      ],
+      "test_scores": [
+        -2.5347041927029674,
+        -0.7741752345197208,
+        0.667086862067827,
+        1.6948979420113457,
+        1.1152387587685104
+      ],
+      "test_weights": [
+        1.8650172126439448,
+        6.575971857522789,
+        0.6225784740606572,
+        8.773866346684663,
+        7.367469810433887
+      ],
+      "alpha": 0.31462869406328925,
+      "gamma": 0.4983129098791093,
+      "reference_evalues": [
+        2.006771207758996,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "official_selected_indices": [],
+      "gamma_le_alpha": false,
+      "name": "random_seed_20260730_index_15",
+      "description": "Randomized fixture #15 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
+    },
+    {
+      "calibration_losses": [
+        0.47091875446351195,
+        0.6672595926993061,
+        0.23239893064535821,
+        0.46632849429831447,
+        0.33518256004263136
+      ],
+      "calibration_scores": [
+        2.0,
+        1.0,
+        0.0,
+        2.0,
+        -1.0
+      ],
+      "calibration_weights": [
+        8.002208263583118,
+        0.1893000995507976,
+        2.7696192717125703,
+        6.47430846118184,
+        9.2056979987122
+      ],
+      "test_scores": [
+        0.0,
+        2.0,
+        1.0,
+        1.0
+      ],
+      "test_weights": [
+        4.61206467202553,
+        0.6169986331446791,
+        3.0618692041481954,
+        7.6557415498930945
+      ],
+      "alpha": 0.6757542374263285,
+      "gamma": 0.6726327773238339,
+      "reference_evalues": [
+        2.0486958877247594,
+        2.420771518583868,
+        2.1673158759753424,
+        1.8742645754057297
+      ],
+      "official_selected_indices": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "gamma_le_alpha": true,
+      "name": "random_seed_20260730_index_16",
+      "description": "Randomized fixture #16 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
+    },
+    {
+      "calibration_losses": [
+        0.05557678024657842
+      ],
+      "calibration_scores": [
+        -2.7267594176582577
+      ],
+      "calibration_weights": [
+        2.320868329539706
+      ],
+      "test_scores": [
+        -2.8503006078911586
+      ],
+      "test_weights": [
+        0.7404421520003568
+      ],
+      "alpha": 0.3844349878492963,
+      "gamma": 0.07853564899074926,
+      "reference_evalues": [
+        0.0
+      ],
+      "official_selected_indices": [],
+      "gamma_le_alpha": true,
+      "name": "random_seed_20260730_index_17",
+      "description": "Randomized fixture #17 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
+    },
+    {
+      "calibration_losses": [
+        0.21761178384801405,
+        0.7550773558900042,
+        0.9513196617477913
+      ],
+      "calibration_scores": [
+        2.0,
+        -2.0,
+        -1.0
+      ],
+      "calibration_weights": [
+        5.558871710790875,
+        6.859403634615169,
+        2.420707547449297
+      ],
+      "test_scores": [
+        -2.0,
+        0.0,
+        2.0,
+        1.0,
+        -2.0
+      ],
+      "test_weights": [
+        6.553130871743364,
+        3.0396689230628264,
+        8.093290834736704,
+        1.9878967486287107,
+        4.412355008210814
+      ],
+      "alpha": 0.6204590847597882,
+      "gamma": 0.6405926032028852,
+      "reference_evalues": [
+        1.5610545532373015,
+        1.5610545532373015,
+        0.0,
+        1.5755771149960298,
+        1.5610545532373015
+      ],
+      "official_selected_indices": [],
+      "gamma_le_alpha": false,
+      "name": "random_seed_20260730_index_18",
+      "description": "Randomized fixture #18 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
+    },
+    {
+      "calibration_losses": [
+        0.24256017194823276,
+        0.13671366898915505,
+        0.8856777533871568,
+        0.1515612133495957
+      ],
+      "calibration_scores": [
+        1.0016056171027579,
+        -0.30531312229052987,
+        -0.8542136267296365,
+        -0.16523324689829955
+      ],
+      "calibration_weights": [
+        1.8571600248432134,
+        6.130328595892408,
+        2.799517157448293,
+        3.653499000291071
+      ],
+      "test_scores": [
+        -2.536954271702501,
+        0.8430019299229405,
+        -0.5344665884277482
+      ],
+      "test_weights": [
+        4.1447567837610215,
+        6.739875627602091,
+        2.948724173226535
+      ],
+      "alpha": 0.1413410793181835,
+      "gamma": 0.23624827035449614,
+      "reference_evalues": [
+        4.232835222452533,
+        0.0,
+        0.0
+      ],
+      "official_selected_indices": [],
+      "gamma_le_alpha": false,
+      "name": "random_seed_20260730_index_19",
+      "description": "Randomized fixture #19 from numpy.random.default_rng(20260730); even indices use a small discrete score grid to keep ties common; gamma drawn <= alpha for half the cases and up to 2.5x alpha for the other half, so both of the official shortcut's regimes are exercised."
+    }
+  ]
+}

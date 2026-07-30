@@ -55,6 +55,23 @@ Three controllers populate this taxonomy so far:
   not separately populated: it follows immediately by summing `m`
   independent `MarginalDeploymentRisk` certificates at the same `alpha`
   (documented, not computed).
+- `selective::mdr::certify_weighted` (Milestone 6, Equation 6.1) extends
+  `certify` to covariate shift, producing `MarginalDeploymentRisk` when
+  `weight_source` is `ImportanceWeightSource::KnownDensityRatio` (Theorem
+  6.2's finite-sample hypothesis). For `Estimated`, it produces
+  `Asymptotic` (Theorem 6.4's `limsup` conclusion) *only* when every one
+  of that theorem's four hypotheses is declared true (independent
+  training data, `L2(P_X)`-consistency, threshold regularity, and
+  `gamma == alpha` exactly) — any one missing downgrades to
+  `EmpiricalOnly` instead, since Theorem 6.4 simply does not apply
+  without them. This is a stricter check than
+  `AnytimeShiftedController::update` below performs for its own
+  `Estimated` case: that controller downgrades to `EmpiricalOnly`
+  *unconditionally*, because Theorem 4.7 (the theorem it implements) has
+  no asymptotic argument for estimated weights at all, under any
+  conditions — the two controllers cite different theorems from different
+  papers, and only one of them has an estimated-weight case to condition
+  on in the first place.
 - `selective::sdr::certify` (Milestone 5) produces `SelectiveDeploymentRisk`
   for a batch of test points. Like MDR, the bound is on the expectation of
   a ratio over the joint draw, not a property of the one realized selected
@@ -67,12 +84,18 @@ Three controllers populate this taxonomy so far:
 - `anytime::AnytimeShiftedController::update` (Milestone 6) produces
   `AnytimeHighProbability` when `weight_source` is
   `ImportanceWeightSource::KnownDensityRatio` (Theorem 4.7's actual
-  hypothesis), and `Asymptotic` when it is `Estimated` instead — the same
-  downgrade pattern as `StabilityEvidence::Estimated`, applied here
-  because the paper establishes no finite-sample guarantee for estimated
-  weights. This is the first controller to actually populate `Asymptotic`
-  and the first to use `ShiftAssumption::CovariateShift` for anything
-  other than a placeholder value.
+  hypothesis), and `EmpiricalOnly` when it is `Estimated` instead,
+  *unconditionally* — Hultberg, Zachariah, and Ribeiro (2026), Theorem 4.7
+  never discusses estimated weights at all (it takes the importance
+  weight as a standing known hypothesis, not something the theorem
+  relaxes), so there is no asymptotic argument here to attach `Asymptotic`
+  to, regardless of what evidence a caller declares. This is the first
+  controller to use `ShiftAssumption::CovariateShift` for anything other
+  than a placeholder value. `selective::mdr::certify_weighted` (above) is
+  the first controller to actually populate `Asymptotic`, since Bai and
+  Jin (2026), Theorem 6.4 gives its own `Estimated` case a real, if
+  conditional, asymptotic argument that Theorem 4.7 has no counterpart
+  for.
 
 Six of the seven `GuaranteeKind` variants are now populated by a shipped
 controller (`ExpectedRisk`, `AnytimeHighProbability`,

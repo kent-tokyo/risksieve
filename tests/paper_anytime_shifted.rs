@@ -19,6 +19,7 @@
 use risksieve::anytime::{AnytimeShiftedController, boundary};
 use risksieve::{
     BoundedLoss, ClosedInterval, GuaranteeKind, ImportanceWeightSource, RiskSieveError,
+    ThresholdRegularityEvidence, WeightConsistencyEvidence,
 };
 
 struct ExceedsThreshold;
@@ -116,9 +117,13 @@ fn anytime_theorem_4_7_weighted_correction_never_tightens_the_unweighted_bound()
 
 /// Estimated weights must not yield the finite-sample
 /// `AnytimeHighProbability` guarantee Theorem 4.7 reserves for known
-/// density ratios.
+/// density ratios -- and, unlike `selective::mdr::certify_weighted`'s
+/// Theorem-6.4-gated `Asymptotic` downgrade, must not yield `Asymptotic`
+/// either: Theorem 4.7 has no asymptotic argument for estimated weights
+/// at all, so `EmpiricalOnly` is the correct ceiling here even when every
+/// field below asserts the strongest possible evidence.
 #[test]
-fn anytime_theorem_4_7_estimated_weights_yield_asymptotic_not_high_probability() {
+fn anytime_theorem_4_7_estimated_weights_yield_empirical_only_not_high_probability() {
     let candidates: Vec<f64> = (0..=20).map(|i| i as f64 / 20.0).collect();
     let mut c = AnytimeShiftedController::builder()
         .target_risk(0.5)
@@ -132,13 +137,20 @@ fn anytime_theorem_4_7_estimated_weights_yield_asymptotic_not_high_probability()
         .weight_source(ImportanceWeightSource::Estimated {
             method: "logistic density-ratio fit".to_string(),
             training_data_separate_from_calibration: true,
+            consistency: WeightConsistencyEvidence::Asserted {
+                justification: "test fixture".to_string(),
+            },
+            threshold_regularity: ThresholdRegularityEvidence::Asserted {
+                justification: "test fixture".to_string(),
+            },
         })
         .build()
         .unwrap();
 
     let certificate = c.update(&0.5, 1.0).unwrap();
-    assert_eq!(certificate.guarantee, GuaranteeKind::Asymptotic);
+    assert_eq!(certificate.guarantee, GuaranteeKind::EmpiricalOnly);
     assert_ne!(certificate.guarantee, GuaranteeKind::AnytimeHighProbability);
+    assert_ne!(certificate.guarantee, GuaranteeKind::Asymptotic);
 }
 
 // AGENTS.md section 9.3's non-increasing-threshold-sequence invariant,

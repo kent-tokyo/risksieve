@@ -12,9 +12,11 @@ Milestone 2 (anytime-valid monotone CRC), Milestone 3 (non-monotonic CRC,
 partial), Milestone 4 (SCoRE-MDR, partial), Milestone 5 (SCoRE-SDR), and
 Milestone 6 (distribution shift, partial) are done.** Milestone 5 does not
 yet include the paper's optional randomized-pruning boost (`prune='hete'`
-/ `'homo'` in the official implementation) or weighted SDR; see the
-Milestone 5 paragraph below and `docs/roadmap.md`. Milestone 7 (downstream
-examples) is not implemented yet.
+/ `'homo'` in the official implementation) or weighted SDR; Milestone 6
+covers importance-weighted anytime-valid CRC and weighted SCoRE-MDR, but
+not yet weighted SDR (`SCoRE_SDR_w`) — see the Milestone 5 and 6
+paragraphs below and `docs/roadmap.md`. Milestone 7 (downstream examples)
+is not implemented yet.
 
 Milestone 0 provides:
 
@@ -93,9 +95,82 @@ here cannot be precomputed the way Milestone 2's is, since Theorem 4.7's
 discovered at runtime as a stopping time, frozen the first time its
 condition holds. `weight_source` is a required, never-defaulted field —
 `KnownDensityRatio` gives the full finite-sample guarantee, `Estimated`
-downgrades to an asymptotic one, since the paper does not establish
-finite-sample validity for estimated weights. Weighted SCoRE is deferred;
+downgrades to an empirical-only diagnostic unconditionally, since the
+paper never discusses estimated weights at all (it takes the importance
+weight as a standing known hypothesis, not something the theorem
+relaxes) — there is no asymptotic argument here to fall back on, unlike
+weighted MDR's `Estimated` case below.
+
+Milestone 6 also adds `risksieve::selective::evalue_weighted::weighted_risk_adjusted_evalue`
+and `risksieve::selective::mdr::certify_weighted`, weighted SCoRE-MDR
+under covariate shift (Bai and Jin (2026), Equation 6.1, Theorem 6.2 and
+6.4). `KnownDensityRatio` yields `MarginalDeploymentRisk`, the same
+finite-sample guarantee kind as unweighted MDR. `Estimated` yields
+`Asymptotic` only when *every one* of Theorem 6.4's four hypotheses is
+declared true — training data independent of calibration,
+`L2(P_X)`-consistency of the weight estimator (`WeightConsistencyEvidence`),
+regularity of the paper's threshold function (`ThresholdRegularityEvidence`),
+and `gamma == alpha` exactly — downgrading to `EmpiricalOnly` otherwise.
+This is a stricter, theorem-by-theorem check, not a blanket
+`Estimated -> Asymptotic` rule: `risksieve::anytime::AnytimeShiftedController`
+downgrades every `Estimated` case to `EmpiricalOnly` unconditionally
+instead, because the anytime-valid paper it implements (Hultberg,
+Zachariah, and Ribeiro (2026), Theorem 4.7) has no asymptotic argument for
+estimated weights at all. Both controllers record
+`ExchangeabilityAssumption::CovariateShiftIid` (calibration i.i.d. from
+`P`, test i.i.d. from a different `Q`), distinct from the plain `Iid`
+(same distribution) claim neither setting actually satisfies. Calibration
+points are weighted individually (`w(X_i)`), not just the test point, and
+weights carry no normalization requirement — the construction is
+invariant to rescaling every weight (calibration and test) by the same
+positive constant, but not to a non-uniform reweighting, and every weight
+is normalized by their shared maximum before computation so that
+finite-but-huge weights (for example near `f64::MAX`) cannot spuriously
+overflow it. The e-value is `f64::INFINITY` in a narrow, non-degenerate
+case (a concrete instance found while building the oracle fixture, not a
+hypothetical one — see `docs/references.md`'s "Equation 6.1 audit"),
+represented by a dedicated `EValue` type (`Finite(NonNegative)` /
+`PositiveInfinity`) rather than clamped to a large finite value; this
+type lives in `certificate.rs` so `Diagnostics::risk_adjusted_evalue` can
+use it directly, round-tripping `Finite`/`PositiveInfinity`/`None`
+distinctly under the `serde` feature. Cross-checked against
+`Tian-Bai/SCoRE`'s own `SCoRE_MDR_w` (38 fixture cases, 109 test points,
+`tests/score_mdr_w_oracle.rs` — two independent comparisons per case,
+since the official package has no weighted e-value function of its own to
+check the e-value against; the official decision is compared exactly for
+every case regardless of `gamma` vs `alpha`, confirmed by a 300,000-trial
+randomized search rather than assumed) and against a Monte Carlo
+simulation of the weighted MDR guarantee
+(`tests/statistical_validity_weighted_mdr.rs`). Weighted SDR is deferred;
 see `docs/roadmap.md`.
+
+A follow-up review pass hardened this milestone's numerics further.
+`WeightAccumulator::update` (used by `AnytimeShiftedController`) now
+returns a `Result`, rejecting an update whose weight-squared, running
+sum, running sum of squares, or effective sample size would overflow to
+non-finite, and is fully transactional: every candidate value is computed
+into a local first, so a rejected update never partially mutates the
+accumulator. `AnytimeShiftedController::update` itself is now
+transactional end to end (weight accumulation, loss evaluation, and the
+derived `gamma_n` correction term all compute against local candidates
+before anything is committed to `self`), and rejects the update outright
+with `RiskSieveError::NumericalOverflow` rather than ever returning a
+certificate whose `gamma_n` is `inf`/`NaN`. `certify_weighted`'s
+calibration weight diagnostics, by contrast, use a separate,
+never-failing `shift::importance::WeightSummary` helper: since
+`weighted_risk_adjusted_evalue` already normalizes by the shared maximum
+weight and stays exact regardless, a diagnostic-only overflow in
+`weight_sum`/`weight_sum_of_squares` must not block the call the way an
+overflow in the anytime controller's guarantee-bearing accumulator does.
+New `Diagnostics::weight_sum_overflowed`/`weight_sum_of_squares_overflowed`
+fields make that distinction explicit (`Some(true)` when the
+corresponding field is `None` *because it overflowed*, not because it
+was never computed) — the same class of serde-safety fix `EValue` exists
+for `risk_adjusted_evalue`. The 300,000-trial `gamma > alpha` audit cited
+above is reproducible by a third party via
+`scripts/audits/compare_score_mdr_w.py --repo /path/to/Tian-Bai/SCoRE`;
+see `docs/references.md`'s "Equation 6.1 audit" for the exact command and
+reproduced counts.
 
 See `AGENTS.md` section 7 for the full implementation sequence and
 `docs/validation.md` for what is and is not tested yet.

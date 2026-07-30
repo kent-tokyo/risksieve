@@ -97,7 +97,12 @@ cross-checked, and `src/selective/coupled.rs` for Equation 5.1, Theorem
 | Algorithm 2 (SCoRE-SDR), independent e-value | `src/selective/sdr.rs::certify_independent`, composing `ebh::select` with Milestone 4's `evalue::risk_adjusted_evalue` applied independently per test point; kept for comparison and backward compatibility |
 | Equation 5.1 / Theorem 5.1 / Algorithm 3 (the paper's own cross-test-point-coupled e-value, its validity, and its efficient computation) | `src/selective/coupled.rs::coupled_risk_adjusted_evalues`, independently derived from the equation (not translated from `SCoRE_SDR`) and cross-checked against it; see "Equation 5.1 audit" below |
 | Zero-selection behavior | `src/selective/ebh.rs::select` (returns an empty, valid selection when no `tau` qualifies) and `src/selective/sdr.rs::realized_selective_risk` (the `max(1, selected_count)` denominator) |
-| Weighted extensions under covariate shift | not yet implemented — deferred within Milestone 6 in favor of the shifted anytime controller (AGENTS.md's backlog item 18 before item 19); see `docs/roadmap.md` |
+| Assumption 6.1 (i.i.d. covariate shift, known density ratio `w(.)`) | `src/selective/mdr.rs::certify_weighted`'s `ImportanceWeightSource` parameter and `ExchangeabilityAssumption::CovariateShiftIid` |
+| Equation 6.1 (weighted risk-adjusted e-value) | `src/selective/evalue_weighted.rs::weighted_risk_adjusted_evalue`, tested in `tests/score_mdr_w_oracle.rs`; see "Equation 6.1 audit" below |
+| Theorem 6.2 (weighted MDR control, known density ratio) | `src/selective/mdr.rs::certify_weighted` with `ImportanceWeightSource::KnownDensityRatio` -> `GuaranteeKind::MarginalDeploymentRisk`; Monte Carlo checked in `tests/statistical_validity_weighted_mdr.rs` |
+| Theorem 6.4 (weighted MDR, consistent independently-estimated weights, asymptotic) | `src/selective/mdr.rs::certify_weighted` with `ImportanceWeightSource::Estimated` -> `GuaranteeKind::Asymptotic`, **only** when every one of the theorem's four hypotheses is declared true (`training_data_separate_from_calibration`, `WeightConsistencyEvidence::Asserted`, `ThresholdRegularityEvidence::Asserted`, and `gamma == alpha` exactly) -> `GuaranteeKind::EmpiricalOnly` otherwise; not Monte Carlo tested (a finite-sample simulation cannot validate a `limsup` claim — see `docs/validation.md`) |
+| Remark 6.6 (doubly robust refinement) | not implemented — needs additional estimator machinery the paper defers to an appendix; see `docs/roadmap.md` |
+| Weighted SDR (`SCoRE_SDR_w`) | not yet implemented — the recommended next PR; see `docs/roadmap.md` |
 
 ### Equation 5.1 audit
 
@@ -180,6 +185,149 @@ confirmed numerically, not guessed:**
   (`tests/paper_score_sdr.rs::score_algorithm_2_sdr_coupled_and_independent_can_disagree`),
   not against this known-incomplete function.
 
+### Equation 6.1 audit
+
+Correspondence between the paper's own notation, `SCoRE_MDR_w`'s variable
+names, and this crate's `src/selective/evalue_weighted.rs` (the full
+derivation lives in that module's doc comment):
+
+| Concept | Paper (Equation 6.1) | `SCoRE_MDR_w` | This crate |
+|---|---|---|---|
+| Known density ratio | `w(X_i) = dQ/dP(X_i)` | `wcalib`, `wtest` (caller-supplied) | `calibration_weights: &[NonNegative]`, `test_weight: NonNegative` |
+| Weighted cumulative calibration loss at/below a threshold | `sum_i w_i * L_i * 1{s(X_i)<=t}` | (folded into the shortcut's running sum) | grouped, Kahan-summed `weight * loss` per canonical `(score, weighted_loss)` group |
+| Normalizing constant | `sum_i w_i + w_{n+1}` | (implicit) | `total_weight` (`kahan_sum(calibration_weights) + test_weight`) |
+| Breakpoint infimum over `l in [0,1]` | Equation 6.1's own infimum | not computed — the official package has no weighted e-value function; `SCoRE_MDR_w` only ever returns the decision, via a closed-form shortcut valid unconditionally for `gamma <= alpha` (with an extra overlap condition for `gamma > alpha`) | `weighted_risk_adjusted_evalue`'s breakpoint enumeration, independently derived (see "no oracle for the e-value itself" below); never takes the shortcut, for any `gamma` |
+| Final e-value | `E^w_{gamma,n+1}` | not returned by the package at all | `EValue::Finite(NonNegative)` or `EValue::PositiveInfinity` |
+| Deployment decision | `1{E^w_{gamma,n+1} >= 1/alpha}` | `SCoRE_MDR_w`'s return value | `EValue::clears_deployment_threshold` |
+
+**No oracle for the e-value itself, only for the decision.** Unlike
+`SCoRE_SDR` (which returns e-values `SCoRE_SDR_w` could be cross-checked
+against directly), the official package's weighted MDR entry point,
+`SCoRE_MDR_w`, is decision-only and does not expose a weighted e-value at
+all — there is no function to import and call for that column. The oracle
+fixture (`tests/fixtures/score_mdr_w_v0_1_1.json`,
+`scripts/oracles/generate_score_mdr_w.py`) therefore makes two independent
+comparisons rather than one: `reference_evalues`, checked against the
+fixture generator's own from-scratch Python breakpoint-enumeration
+implementation of Equation 6.1 (written independently of both this
+crate's Rust code and of the official package, since neither could serve
+as a ground truth for the e-value itself); and `official_selected_indices`,
+checked against the actual `SCoRE_MDR_w` shortcut, exactly, for **every**
+case — `gamma <= alpha` or not. This crate's `weighted_risk_adjusted_evalue`
+never takes the shortcut at all, so there was no a priori reason its
+decision would need the shortcut's own `gamma > alpha` overlap condition
+to already agree with it; this was verified, not assumed (see "gamma >
+alpha: verified, not assumed" below). All 38 fixture cases (109 test
+points total, `tests/score_mdr_w_oracle.rs`) match `reference_evalues`,
+including a `+infinity` case (zero calibration weight, zero test weight
+combined with zero weighted loss) where the reference implementation,
+`SCoRE_MDR_w`'s shortcut, and this crate's `weighted_risk_adjusted_evalue`
+all independently agree the point should deploy, and every case's
+`official_selected_indices` matches exactly. No formula discrepancy was
+found between this crate's construction and either comparison target —
+unlike Equation 5.1 (see the audit above), this audit did not surface a
+difference requiring documentation and a judgment call.
+
+**`gamma > alpha`: verified, not assumed.** An earlier version of this
+fixture only asserted `official_selected_indices` for `gamma <= alpha`,
+reasoning that this crate never uses `SCoRE_MDR_w`'s shortcut so its
+`gamma > alpha` overlap condition shouldn't matter — but that reasoning
+was not itself checked before the gate was removed. Doing so surfaced two
+things:
+
+- A 300,000-trial randomized search (fixed seed) comparing this crate's
+  decision (via the from-scratch reference below) against the official
+  decision found **zero mismatches**, including tens of thousands of
+  `gamma > alpha` trials where the shortcut's overlap condition actually
+  changed its naive (pre-overlap-check) decision. Two of those trials
+  became fixed fixture cases: `gamma_greater_than_alpha_overlap_condition_flips_to_abstain`
+  (naive says deploy, overlap condition correctly flips to abstain) and
+  `gamma_greater_than_alpha_overlap_condition_does_not_flip` (naive says
+  deploy, overlap condition confirms it). The randomized cases were also
+  widened to sample `gamma` up to `2.5x alpha`, not only `<= alpha`. This
+  search is reproducible by a third party, not just asserted here:
+
+  ```bash
+  python3 scripts/audits/compare_score_mdr_w.py --repo /path/to/Tian-Bai/SCoRE
+  ```
+
+  (default seed `20260730`, default `300000` trials.) At that seed and
+  trial count: `66231` trials have `gamma > alpha`; of those, `42018`
+  have a naive (pre-overlap-check) decision of "deploy"; of *those*,
+  `26805` are flipped to "abstain" by the overlap condition; and the
+  official-vs-reference mismatch count is `0`.
+- Building those targeted cases surfaced a genuine bug in this fixture
+  generator's own reference implementation, not in this crate — see
+  "A floating-point boundary bug in the reference implementation" below.
+
+**`gamma`'s domain.** Theorem 6.2 states the same `gamma in (0,1)` domain
+as the unweighted Theorem 4.2 (unlike Theorem 5.1's SDR extension, which
+needed a wider domain for its extra `m/(n+1)` normalizer) — confirmed
+directly from the paper text, not inferred by analogy — so
+`certify_weighted` reuses `OpenUnitInterval` unchanged, with no new domain
+analysis or clamping needed.
+
+**`EValue::PositiveInfinity`.** Equation 4.1's unweighted construction is
+provably always finite (every candidate objective value is a ratio with a
+strictly positive denominator by construction). Equation 6.1's weighted
+construction is not: when the test point's own weighted contribution to
+the denominator is zero (test weight zero, or test weight positive but
+its weighted loss zero at every candidate `l`) while its numerator
+contribution can still reach the deployment threshold, the true
+mathematical infimum is `+infinity`, not a large finite number. This was
+found as a concrete, reproducible case while generating the oracle
+fixture above (not a hypothetical edge case), and cross-validated against
+`SCoRE_MDR_w`'s own shortcut, which independently agrees the point should
+deploy. Representing this as a dedicated `EValue::PositiveInfinity`
+variant, rather than clamping to `f64::MAX` or a similar sentinel, avoids
+silently understating an unbounded e-value as merely large; see
+`src/selective/evalue_weighted.rs`'s module docs for the full case.
+
+**Weight normalization, and a spurious `+infinity` this prevents.**
+`weighted_risk_adjusted_evalue` normalizes every weight (calibration and
+test alike) by their shared maximum before any other computation,
+exploiting Equation 6.1's own proven uniform-scale invariance (see the
+module docs). Computing at the caller's raw scale instead can overflow
+`f64` for ordinary-looking finite inputs: two `NonNegative` weights near
+`f64::MAX` make `total_weight = calibration_weight_sum + test_weight`
+overflow to `+infinity`, which previously produced a spurious
+`EValue::PositiveInfinity` for what is, once the shared scale cancels, a
+genuinely finite e-value (`2.0`, confirmed by hand-derivation and a
+regression test, `huge_but_finite_weights_do_not_spuriously_overflow_to_infinity`).
+The fixture's `overflow_adversarial_weights_near_f64_max` case exercises
+the same scenario end to end, including in the oracle's own Python
+reference implementation, which received the identical normalization fix
+(see below).
+
+**A floating-point boundary bug in the reference implementation, not in
+this crate.** Building the `gamma > alpha` fixture cases above, an
+initial 200,000-trial search found 69 disagreements between this
+fixture's own `weighted_evalue_reference` function and the official
+`SCoRE_MDR_w` decision. Hand-deriving the true e-value for the smallest
+failing case (`n=1`, `Scalib=[0.0]`, `Lcalib=[0.7251...]`,
+`Wcalib=[1.2298...]`, `Stest=[-2.0]`, `Wtest=[1.2062...]`,
+`alpha=0.5692`, `gamma=0.7664`) gave `~1.3048`, matching both this
+crate's `weighted_risk_adjusted_evalue` (`1.304815636764952` exactly) and
+the official shortcut's decision (abstain, since `1.3048 < 1/alpha`) —
+not the reference script's own answer of `2.0196` (which would deploy).
+The reference script's breakpoint candidates are each derived so a
+threshold's feasibility constraint holds with *exact* equality in exact
+arithmetic, but reconstructing that same quantity in floating point can
+land a few ULPs past the boundary; without a tolerance, the feasibility
+check (`contribution <= gamma_scaled`) can reject a threshold that is
+mathematically feasible, silently missing the true minimum. This crate's
+Rust implementation already carries an epsilon tolerance for exactly this
+reason (`feasibility_epsilon`, shared with `evalue.rs`'s unweighted
+construction); the *reference script* did not. Fixed by adding the
+identical tolerance to `weighted_evalue_reference`; a 300,000-trial
+re-check after the fix found zero further mismatches (the count cited
+above, in "`gamma > alpha`: verified, not assumed"). This was a bug in a
+one-off Python cross-check, not in any of the three things it was built
+to compare — the Rust crate, the official package, or (once fixed) itself
+— but it is exactly the kind of thing this crate's own numerics policy
+(AGENTS.md section 8) exists to catch, so it is recorded here rather than
+silently amended.
+
 **Selection-power comparison (measured, not asserted):** the coupled and
 independent constructions select different sets on some inputs (see the
 fixture above: coupled selects a test point the independent construction
@@ -250,7 +398,8 @@ Theorem 5.1; randomized pruning and weighted SDR deferred — see
   label-requiring realized-risk helper.
 
 **Milestone 6** provides importance-weighted anytime-valid CRC (Theorem
-4.7; weighted SCoRE deferred — see the table above):
+4.7) and weighted SCoRE-MDR (Equation 6.1, Theorem 6.2/6.4; weighted SDR
+deferred — see the table above):
 
 - `src/shift/importance.rs::WeightAccumulator` — non-negative finite
   weight validation, compensated running sum/sum-of-squares, min/max,
@@ -261,6 +410,20 @@ Theorem 5.1; randomized pruning and weighted SDR deferred — see
 - `src/anytime/shifted.rs::AnytimeShiftedController` — the shifted
   controller, with `m*` discovered at runtime as a stopping time on the
   realized weights rather than precomputed at build time.
+- `src/selective/evalue_weighted.rs::weighted_risk_adjusted_evalue` — the
+  weighted risk-adjusted e-value construction, including the
+  `EValue::PositiveInfinity` case and weight normalization (see "Equation
+  6.1 audit" above).
+- `src/selective/mdr.rs::certify_weighted` — the weighted deployment
+  decision, downgrading its `GuaranteeKind` to `Asymptotic` only when
+  every one of Theorem 6.4's hypotheses is declared true via
+  `ImportanceWeightSource::Estimated`'s `WeightConsistencyEvidence` and
+  `ThresholdRegularityEvidence` fields (plus `gamma == alpha`), and to
+  `EmpiricalOnly` otherwise.
+- `src/guarantee.rs::ExchangeabilityAssumption::CovariateShiftIid` — the
+  i.i.d.-within-each-of-two-different-distributions claim both
+  `AnytimeShiftedController` and `certify_weighted` now record, distinct
+  from the plain `Iid` (same distribution) both previously misused.
 
 See `guarantees.md` and `assumptions.md` for the vocabulary itself, and
 AGENTS.md section 7 for the full milestone sequence.

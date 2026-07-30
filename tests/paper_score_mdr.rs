@@ -19,10 +19,14 @@
 
 use risksieve::selective::evalue::risk_adjusted_evalue;
 use risksieve::selective::mdr::certify;
-use risksieve::{ClosedUnitInterval, GuaranteeKind, OpenUnitInterval};
+use risksieve::{ClosedUnitInterval, EValue, GuaranteeKind, NonNegative, OpenUnitInterval};
 
 fn loss(value: f64) -> ClosedUnitInterval {
     ClosedUnitInterval::new("loss", value).unwrap()
+}
+
+fn finite(value: f64) -> EValue {
+    EValue::Finite(NonNegative::new("e", value).unwrap())
 }
 
 /// Hand trace: `n=1`, calibration `(s_1, L_1) = (0.0, 1.0)`, test score
@@ -52,7 +56,10 @@ fn score_algorithm_1_mdr_matches_reference() {
     let certificate = certify(&[loss(1.0)], &[0.0], 1.0, alpha, gamma).unwrap();
     assert!(!certificate.parameter, "must abstain: e-value is 0");
     assert_eq!(certificate.guarantee, GuaranteeKind::MarginalDeploymentRisk);
-    assert_eq!(certificate.diagnostics.risk_adjusted_evalue, Some(0.0));
+    assert_eq!(
+        certificate.diagnostics.risk_adjusted_evalue,
+        Some(finite(0.0))
+    );
 }
 
 /// Hand trace: `n=1`, calibration `(s_1, L_1) = (1.0, 0.0)`, test score
@@ -100,5 +107,8 @@ fn score_no_feasible_threshold_is_not_silently_conflated_with_a_real_zero() {
     let real_zero_gamma = OpenUnitInterval::new("gamma", 0.5).unwrap();
     let real_zero = certify(&[loss(1.0)], &[0.0], 1.0, alpha, real_zero_gamma).unwrap();
     assert_eq!(real_zero.diagnostics.uninformative_result, Some(false));
-    assert_eq!(real_zero.diagnostics.risk_adjusted_evalue, Some(0.0));
+    assert_eq!(
+        real_zero.diagnostics.risk_adjusted_evalue,
+        Some(finite(0.0))
+    );
 }

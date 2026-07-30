@@ -58,7 +58,7 @@ pub enum GuaranteeKind {
 /// Whether calibration and test data are assumed i.i.d. or only
 /// exchangeable.
 ///
-/// Neither variant is checkable from observed data; it is always a
+/// No variant is checkable from observed data; each is always a
 /// caller-declared assumption (AGENTS.md section 4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -69,6 +69,17 @@ pub enum ExchangeabilityAssumption {
     /// Calibration and test data are exchangeable but not necessarily
     /// i.i.d.
     Exchangeable,
+    /// Calibration observations are i.i.d. from a distribution `P`, test
+    /// observations are i.i.d. from a possibly different distribution
+    /// `Q`, and the two obey a declared covariate-shift relationship
+    /// (Bai and Jin 2026, Assumption 6.1; Hultberg, Zachariah, and
+    /// Ribeiro 2026, Section 4.2's `P*`) -- paired with
+    /// `ShiftAssumption::CovariateShift`. This is a genuinely different
+    /// claim from `Iid`, not a special case of it: the combined sample
+    /// is *not* identically distributed (calibration and test draw from
+    /// different laws), only each half is, separately, i.i.d. within
+    /// itself.
+    CovariateShiftIid,
 }
 
 /// Whether the loss is monotone in the parameter, and if so, in which
@@ -104,6 +115,56 @@ pub enum SymmetryAssumption {
     NotEstablished,
 }
 
+/// Evidence that an estimated importance-weight *sequence* converges to
+/// the true density ratio in `L2(P_X)` (Bai and Jin 2026, Theorem 6.4:
+/// `||w_bar_n(.) - w(.)||_{L2(P_X)} = o_P(1)`), one of that theorem's
+/// four hypotheses for its asymptotic MDR conclusion.
+///
+/// Not checkable by this crate from a single realized weight estimate --
+/// it is a statement about a limiting sequence of estimators, so it is
+/// always caller-declared (AGENTS.md section 4), the same category
+/// `SymmetryAssumption::CallerAsserted` and `StabilityEvidence::UserSupplied`
+/// already use for claims this crate cannot verify from the data it sees.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum WeightConsistencyEvidence {
+    /// The caller asserts the estimator sequence is `L2(P_X)`-consistent
+    /// for the true density ratio.
+    Asserted {
+        /// The caller's justification, for example a citation for the
+        /// estimator's own consistency proof.
+        justification: String,
+    },
+    /// No consistency evidence is claimed.
+    Unknown,
+}
+
+/// Evidence that Bai and Jin (2026) Theorem 6.4's function
+/// `F(t) = E_P[w(X)*l(X)*1{s(X)<=t}] / E_P[w(X)]` is continuous and
+/// strictly increasing at `t* = sup{t : F(t) <= alpha}` -- the target
+/// risk level, not `gamma` -- the theorem's other hypothesis beyond
+/// weight consistency and independent training data. `gamma == alpha` is
+/// a separate, additional hypothesis of the same theorem (see
+/// [`ImportanceWeightSource::Estimated`]'s docs): if `t*` were already
+/// defined in terms of `gamma`, requiring `gamma == alpha` on top of it
+/// would be redundant rather than a genuinely separate condition.
+///
+/// Like [`WeightConsistencyEvidence`], this is a population-level
+/// regularity condition on an unknown function, not something this crate
+/// can check from finitely many observations -- always caller-declared.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum ThresholdRegularityEvidence {
+    /// The caller asserts `F` is continuous and strictly increasing at
+    /// `t*`.
+    Asserted {
+        /// The caller's justification.
+        justification: String,
+    },
+    /// No regularity evidence is claimed.
+    Unknown,
+}
+
 /// How an importance weight (density ratio) used to correct for covariate
 /// shift was obtained.
 #[derive(Debug, Clone, PartialEq)]
@@ -113,12 +174,36 @@ pub enum ImportanceWeightSource {
     /// distributions is known exactly, not estimated from data.
     KnownDensityRatio,
     /// The density ratio was estimated from data.
+    ///
+    /// `selective::mdr::certify_weighted` only returns
+    /// `GuaranteeKind::Asymptotic` (Bai and Jin 2026, Theorem 6.4) when
+    /// *every* one of that theorem's hypotheses is declared here --
+    /// `training_data_separate_from_calibration`, `consistency`, and
+    /// `threshold_regularity` all hold, *and* the caller passed
+    /// `gamma == alpha` exactly -- and downgrades to
+    /// `GuaranteeKind::EmpiricalOnly` otherwise, per that function's
+    /// module docs. `anytime::AnytimeShiftedController`, by contrast,
+    /// downgrades every `Estimated` case to `EmpiricalOnly`
+    /// unconditionally, regardless of these fields: Hultberg, Zachariah,
+    /// and Ribeiro (2026), Theorem 4.7 never discusses estimated weights
+    /// at all (it assumes the importance weight `omega` is known as a
+    /// standing hypothesis of the theorem itself), so there is no
+    /// asymptotic argument for that controller to condition on -- see
+    /// that module's docs.
     Estimated {
         /// Description of the estimation method.
         method: String,
         /// Whether the data used to fit the estimator is disjoint from the
-        /// calibration data used to compute the certificate.
+        /// calibration data used to compute the certificate (and, for
+        /// Theorem 6.4's single-test-point setting, from the test point
+        /// itself).
         training_data_separate_from_calibration: bool,
+        /// Evidence that the estimator sequence is `L2(P_X)`-consistent
+        /// for the true density ratio (Theorem 6.4's hypothesis).
+        consistency: WeightConsistencyEvidence,
+        /// Evidence that Theorem 6.4's threshold-regularity condition
+        /// holds for the relevant `F` and `t*`.
+        threshold_regularity: ThresholdRegularityEvidence,
     },
 }
 
@@ -245,6 +330,46 @@ mod tests {
         };
         let unknown = StabilityEvidence::Unknown;
         assert_ne!(analytic, unknown);
+    }
+
+    #[test]
+    fn exchangeability_covariate_shift_iid_is_distinct_from_plain_iid() {
+        assert_ne!(
+            ExchangeabilityAssumption::CovariateShiftIid,
+            ExchangeabilityAssumption::Iid
+        );
+    }
+
+    #[test]
+    fn weight_consistency_evidence_variants_are_distinguishable() {
+        let asserted = WeightConsistencyEvidence::Asserted {
+            justification: "estimator has known L2(P_X) consistency rate".into(),
+        };
+        assert_ne!(asserted, WeightConsistencyEvidence::Unknown);
+    }
+
+    #[test]
+    fn threshold_regularity_evidence_variants_are_distinguishable() {
+        let asserted = ThresholdRegularityEvidence::Asserted {
+            justification: "F is smooth and strictly monotone near t*".into(),
+        };
+        assert_ne!(asserted, ThresholdRegularityEvidence::Unknown);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn importance_weight_source_estimated_serde_round_trip() {
+        let source = ImportanceWeightSource::Estimated {
+            method: "logistic density-ratio fit".into(),
+            training_data_separate_from_calibration: true,
+            consistency: WeightConsistencyEvidence::Asserted {
+                justification: "known minimax rate".into(),
+            },
+            threshold_regularity: ThresholdRegularityEvidence::Unknown,
+        };
+        let json = serde_json::to_string(&source).unwrap();
+        let restored: ImportanceWeightSource = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, source);
     }
 
     #[cfg(feature = "serde")]
