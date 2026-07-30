@@ -70,13 +70,23 @@ pub struct Diagnostics {
     /// The finite-sample or anytime correction term added to the empirical
     /// risk.
     pub correction_term: Option<f64>,
-    /// The effective sample size, for example after importance weighting.
+    /// The effective sample size (Kish's ESS) of the *calibration* weights
+    /// only, for example after importance weighting. For
+    /// `selective::mdr::certify_weighted`, this deliberately excludes
+    /// `test_weight` (recorded separately below): ESS characterizes how
+    /// degenerate a *reweighted sample* is, and the single test point is
+    /// not itself a sample being reweighted here -- `test_weight` enters
+    /// Equation 6.1 as one scalar term in a ratio, not as a population ESS
+    /// would use it. Mixing it in would conflate two different things
+    /// this diagnostic is not meant to answer at once.
     pub effective_sample_size: Option<f64>,
     /// The number of items selected for deployment.
     pub selected_count: Option<usize>,
     /// The fraction of items on which the procedure abstained.
     pub abstention_rate: Option<f64>,
-    /// The `(min, max)` range of importance weights used, if any.
+    /// The `(min, max)` range of importance weights used, if any. Same
+    /// calibration-only scope as `effective_sample_size` for
+    /// `certify_weighted`.
     pub weight_range: Option<(f64, f64)>,
     /// The stability constant beta actually used in the computation.
     pub stability_beta: Option<f64>,
@@ -123,11 +133,26 @@ pub struct Diagnostics {
     /// The sum of importance weights folded in so far (AGENTS.md
     /// Milestone 6). Together with `weight_sum_of_squares`, lets a caller
     /// recompute the shift-correction bias term and Kish effective
-    /// sample size independently of `effective_sample_size`.
+    /// sample size independently of `effective_sample_size`. For
+    /// `selective::mdr::certify_weighted`, this is the *calibration*
+    /// weight sum only -- see `effective_sample_size`'s doc for why the
+    /// test point's weight is excluded here and recorded separately in
+    /// `test_weight` instead.
     pub weight_sum: Option<f64>,
     /// The sum of squared importance weights folded in so far (`W_n` in
-    /// Hultberg, Zachariah, and Ribeiro 2026, Theorem 4.7).
+    /// Hultberg, Zachariah, and Ribeiro 2026, Theorem 4.7). Same
+    /// calibration-only scope as `weight_sum` for `certify_weighted`.
     pub weight_sum_of_squares: Option<f64>,
+    /// `selective::mdr::certify_weighted`'s test point's own importance
+    /// weight (Equation 6.1's `w_{n+1}`) -- recorded separately from the
+    /// calibration-only `weight_sum`/`weight_sum_of_squares`/
+    /// `effective_sample_size`/`weight_range` above, since Equation 6.1's
+    /// shared normalizing constant `sum_{i=1}^{n+1} w_i` combines this
+    /// with the calibration weight sum, and a caller auditing the
+    /// certificate has no other way to recover it (the same reasoning
+    /// `gamma` and `ebh_tau_hat` are recorded for). `None` for every
+    /// other controller, which has no separate test-point weight.
+    pub test_weight: Option<f64>,
 }
 
 /// The output of every `risksieve` controller: a parameter together with

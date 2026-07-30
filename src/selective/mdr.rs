@@ -321,6 +321,7 @@ pub fn certify_weighted(
             weight_sum_of_squares: Some(weight_stats.sum_of_squares()),
             effective_sample_size: Some(weight_stats.effective_sample_size()),
             weight_range: weight_stats.range(),
+            test_weight: Some(test_weight.get()),
             ..Default::default()
         },
     })
@@ -695,15 +696,19 @@ mod tests {
             &[1.0, 2.0],
             &weights(&[1.0, 3.0]),
             0.0,
-            weight(1.0),
+            weight(5.0),
             alpha,
             alpha,
             ImportanceWeightSource::KnownDensityRatio,
         )
         .unwrap();
+        // weight_sum/weight_sum_of_squares/weight_range are calibration
+        // weights only (1.0, 3.0) -- the test point's weight (5.0) is not
+        // folded into them, and is instead recorded separately.
         assert_eq!(certificate.diagnostics.weight_sum, Some(4.0));
         assert_eq!(certificate.diagnostics.weight_sum_of_squares, Some(10.0));
         assert_eq!(certificate.diagnostics.weight_range, Some((1.0, 3.0)));
+        assert_eq!(certificate.diagnostics.test_weight, Some(5.0));
     }
 
     #[test]
