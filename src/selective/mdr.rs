@@ -243,7 +243,7 @@ pub fn certify_weighted(
         test_weight,
         gamma,
     )?;
-    let deploy = outcome.value.get() >= 1.0 / alpha.get();
+    let deploy = outcome.value.clears_deployment_threshold(alpha);
 
     let guarantee = match &weight_source {
         ImportanceWeightSource::KnownDensityRatio => GuaranteeKind::MarginalDeploymentRisk,
@@ -273,7 +273,7 @@ pub fn certify_weighted(
         assumptions,
         calibration_size,
         diagnostics: Diagnostics {
-            risk_adjusted_evalue: Some(outcome.value.get()),
+            risk_adjusted_evalue: Some(outcome.value.as_f64()),
             gamma: Some(gamma.get()),
             uninformative_result: Some(!outcome.feasible_threshold_found),
             weight_sum: Some(weight_stats.sum()),

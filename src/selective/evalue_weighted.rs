@@ -69,7 +69,7 @@
 //! | `sum_i w_i*L_i*1{s(X_i)<=t}` | `np.sum(wcalib*Lcalib*(Scalib<=t))` | `weighted_base_sum[j]` (grouped by score, Kahan-summed in canonical order) |
 //! | `sum_{i=1}^{n+1} w_i` (total weight -- constant in `t`) | `wtest[i_itr] + calib_w_sum` | `total_weight` |
 //! | the `l` solving `F(t;l) = gamma` for a given `t` | not computed (shortcut avoids it) | `(gamma_scaled - weighted_base_sum[j]) / test_weight`, clamped to `[0,1]`, skipped entirely when `test_weight == 0` (see "Zero test weight" below) |
-//! | `E_{gamma,n+1}` | not computed (decision-only shortcut) | the returned [`super::evalue::EValueOutcome::value`] |
+//! | `E_{gamma,n+1}` | not computed (decision-only shortcut) | the returned [`WeightedEValueOutcome::value`], an [`EValue`] (see its docs for why this is not simply a [`crate::probability::NonNegative`]) |
 //!
 //! ## Why this reuses `evalue.rs`'s structure rather than `mdr_w`'s shortcut
 //!
@@ -125,7 +125,6 @@
 use crate::error::RiskSieveError;
 use crate::numerics::summation::kahan_sum;
 use crate::probability::{ClosedUnitInterval, NonNegative, OpenUnitInterval, check_finite};
-use crate::selective::evalue::EValueOutcome;
 
 fn normalize_zero(x: f64) -> f64 {
     if x == 0.0 { 0.0 } else { x }
@@ -135,6 +134,76 @@ fn normalize_zero(x: f64) -> f64 {
 /// the same conservative-rounding argument applies unchanged here.
 fn feasibility_epsilon(rhs: f64) -> f64 {
     rhs.abs().max(1.0) * 8.0 * f64::EPSILON
+}
+
+/// A weighted risk-adjusted e-value, which -- unlike the unweighted
+/// construction in [`super::evalue`] -- can be mathematically
+/// `+infinity`, not merely large.
+///
+/// This happens only when `test_weight == 0` (so `l` has no effect on
+/// `F(t;l)`, per the module docs' "Zero test weight" section) *and* the
+/// weighted calibration loss at every feasible threshold is exactly `0`
+/// (every calibration point below the threshold has zero loss, zero
+/// weight, or both). The combined calibration-plus-test weight is
+/// nonzero in this case (otherwise [`RiskSieveError::DegenerateWeights`]
+/// is returned instead), so this is a genuine value of the infimum in
+/// Equation 6.1, not a numerical error -- deploying is still the correct
+/// decision (thresholding at `1/alpha` for any `alpha < 1` deploys
+/// unconditionally when the e-value is unbounded), and the official
+/// `SCoRE_MDR_w` shortcut deploys on the fixture exercising this case
+/// too (`tests/fixtures/score_mdr_w_v0_1_1.json`'s `zero_weights` case).
+/// Clamping this to a large finite value or silently rejecting it would
+/// misstate the guarantee (AGENTS.md section 8: "never silently saturate
+/// an e-value").
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum EValue {
+    /// A finite, non-negative e-value.
+    Finite(NonNegative),
+    /// The e-value's true value is mathematically unbounded -- see this
+    /// type's own docs for the exact (narrow) condition.
+    PositiveInfinity,
+}
+
+impl EValue {
+    /// Whether thresholding this e-value at `1/alpha` deploys: always
+    /// `true` for [`EValue::PositiveInfinity`] (for any `alpha < 1`),
+    /// otherwise the ordinary finite comparison.
+    pub fn clears_deployment_threshold(&self, alpha: OpenUnitInterval) -> bool {
+        match self {
+            EValue::Finite(value) => value.get() >= 1.0 / alpha.get(),
+            EValue::PositiveInfinity => true,
+        }
+    }
+
+    /// A plain `f64` view for diagnostics, with [`EValue::PositiveInfinity`]
+    /// represented as `f64::INFINITY`. Not a [`NonNegative`]: that type
+    /// rejects infinite values by construction, which is exactly the
+    /// distinction this type exists to preserve.
+    pub fn as_f64(&self) -> f64 {
+        match self {
+            EValue::Finite(value) => value.get(),
+            EValue::PositiveInfinity => f64::INFINITY,
+        }
+    }
+}
+
+/// The result of evaluating Equation 6.1's weighted e-value.
+///
+/// Mirrors [`super::evalue::EValueOutcome`]'s shape, with `value` widened
+/// to [`EValue`] to represent the genuinely-possible `+infinity` case
+/// (see that type's docs) -- reusing `EValueOutcome` itself is not
+/// possible since its `value` field is fixed to `NonNegative`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WeightedEValueOutcome {
+    /// The computed weighted risk-adjusted e-value.
+    pub value: EValue,
+    /// `false` when the value minimizing Equation 6.1 comes from the
+    /// case where *no* threshold in `M` satisfies `F(t;l) <= gamma` for
+    /// any `l` -- the same distinction
+    /// [`super::evalue::EValueOutcome::feasible_threshold_found`] makes,
+    /// orthogonal to whether `value` is finite or `PositiveInfinity`.
+    pub feasible_threshold_found: bool,
 }
 
 /// Computes the weighted risk-adjusted e-value `E_{gamma,n+1}` (Equation
@@ -160,7 +229,7 @@ pub fn weighted_risk_adjusted_evalue(
     test_score: f64,
     test_weight: NonNegative,
     gamma: OpenUnitInterval,
-) -> Result<EValueOutcome, RiskSieveError> {
+) -> Result<WeightedEValueOutcome, RiskSieveError> {
     if calibration_losses.len() != calibration_scores.len()
         || calibration_losses.len() != calibration_weights.len()
     {
@@ -265,19 +334,37 @@ pub fn weighted_risk_adjusted_evalue(
         }
     }
 
-    let mut best_value = f64::INFINITY;
-    let mut best_feasible = true;
+    // Tracked as `Option`, not a `f64::INFINITY` sentinel compared via
+    // `<`: unlike `evalue.rs` (whose objective is provably always
+    // finite, so a finite first candidate always overwrites the
+    // sentinel), a candidate's own value can legitimately *be*
+    // `+infinity` here (see `EValue`'s docs) -- `infinity < infinity` is
+    // `false`, which would silently skip recording that a candidate was
+    // ever evaluated at all if a plain sentinel comparison were reused.
+    let mut best: Option<(f64, bool)> = None;
     for &ell in &candidates {
         let j = largest_feasible_index(ell);
         let value = objective_at(ell, j);
-        if value < best_value {
-            best_value = value;
-            best_feasible = j.is_some();
-        }
+        let feasible_here = j.is_some();
+        best = Some(match best {
+            None => (value, feasible_here),
+            Some((current_value, _)) if value < current_value => (value, feasible_here),
+            Some(existing) => existing,
+        });
     }
+    let (best_value, best_feasible) = best.expect("candidates always contains at least [0.0, 1.0]");
 
-    Ok(EValueOutcome {
-        value: NonNegative::new("weighted_risk_adjusted_evalue", best_value)?,
+    let value = if best_value.is_infinite() {
+        EValue::PositiveInfinity
+    } else {
+        EValue::Finite(NonNegative::new(
+            "weighted_risk_adjusted_evalue",
+            best_value,
+        )?)
+    };
+
+    Ok(WeightedEValueOutcome {
+        value,
         feasible_threshold_found: best_feasible,
     })
 }
@@ -371,7 +458,7 @@ mod tests {
             gamma(0.5),
         )
         .unwrap();
-        assert!(outcome.value.get().is_finite());
+        assert!(outcome.value.as_f64().is_finite());
     }
 
     #[test]
@@ -385,7 +472,47 @@ mod tests {
             gamma(0.5),
         )
         .unwrap();
-        assert!(outcome.value.get().is_finite() && outcome.value.get() >= 0.0);
+        assert!(outcome.value.as_f64().is_finite() && outcome.value.as_f64() >= 0.0);
+    }
+
+    /// Hand-traceable `EValue::PositiveInfinity` case, found while
+    /// generating the oracle fixture (`zero_weights` in
+    /// `tests/fixtures/score_mdr_w_v0_1_1.json`): calibration point 0 has
+    /// the only positive loss (`1.0`) but zero weight, calibration point
+    /// 1 has zero loss, and the test point's own weight is zero too. The
+    /// weighted calibration loss is therefore exactly `0` at every
+    /// threshold regardless of `l` (since `test_weight == 0` removes any
+    /// `l`-dependence -- see the module docs), while the test point's own
+    /// score (`0.0`) is `<=` the largest pooled score (`1.0`), so its
+    /// indicator is `1` there. The true infimum is `total_weight / 0`, a
+    /// genuine mathematical `+infinity`, not a numerical accident. The
+    /// official `SCoRE_MDR_w` shortcut deploys on this exact input too
+    /// (recorded in the fixture), consistent with an unbounded e-value.
+    #[test]
+    fn zero_test_weight_with_zero_weighted_loss_gives_positive_infinity() {
+        let outcome = weighted_risk_adjusted_evalue(
+            &losses(&[1.0, 0.0]),
+            &[0.0, 1.0],
+            &weights(&[0.0, 1.0]),
+            0.0,
+            weight(0.0),
+            gamma(0.5),
+        )
+        .unwrap();
+        assert_eq!(outcome.value, EValue::PositiveInfinity);
+        assert!(outcome.feasible_threshold_found);
+
+        // Deploys unconditionally, for any alpha < 1.
+        assert!(
+            outcome
+                .value
+                .clears_deployment_threshold(OpenUnitInterval::new("alpha", 0.999).unwrap())
+        );
+        assert!(
+            outcome
+                .value
+                .clears_deployment_threshold(OpenUnitInterval::new("alpha", 0.001).unwrap())
+        );
     }
 
     /// At `w_i = 1` for every calibration point and the test point,
@@ -409,8 +536,8 @@ mod tests {
         )
         .unwrap();
         let unweighted = risk_adjusted_evalue(&losses(&[1.0]), &[0.0], 1.0, g).unwrap();
-        assert_eq!(weighted.value.get(), unweighted.value.get());
-        assert_eq!(weighted.value.get(), 0.0);
+        assert_eq!(weighted.value.as_f64(), unweighted.value.get());
+        assert_eq!(weighted.value.as_f64(), 0.0);
 
         let weighted2 = weighted_risk_adjusted_evalue(
             &losses(&[0.0]),
@@ -422,8 +549,8 @@ mod tests {
         )
         .unwrap();
         let unweighted2 = risk_adjusted_evalue(&losses(&[0.0]), &[1.0], 0.0, g).unwrap();
-        assert_eq!(weighted2.value.get(), unweighted2.value.get());
-        assert_eq!(weighted2.value.get(), 2.0);
+        assert_eq!(weighted2.value.as_f64(), unweighted2.value.get());
+        assert_eq!(weighted2.value.as_f64(), 2.0);
     }
 
     #[test]
@@ -447,7 +574,7 @@ mod tests {
             g,
         )
         .unwrap();
-        assert_eq!(base.value.get(), rescaled.value.get());
+        assert_eq!(base.value.as_f64(), rescaled.value.as_f64());
     }
 
     #[test]
@@ -475,7 +602,7 @@ mod tests {
             g,
         )
         .unwrap();
-        assert_ne!(base.value.get(), calib_only_rescaled.value.get());
+        assert_ne!(base.value.as_f64(), calib_only_rescaled.value.as_f64());
     }
 
     #[test]
@@ -489,7 +616,7 @@ mod tests {
             gamma(0.5),
         )
         .unwrap();
-        assert!(outcome.value.get().is_finite());
+        assert!(outcome.value.as_f64().is_finite());
     }
 
     #[test]
@@ -503,7 +630,7 @@ mod tests {
             gamma(0.5),
         )
         .unwrap();
-        assert!(outcome.value.get().is_finite() && outcome.value.get() >= 0.0);
+        assert!(outcome.value.as_f64().is_finite() && outcome.value.as_f64() >= 0.0);
     }
 
     #[test]
@@ -548,7 +675,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(forward.value.get(), reversed_outcome.value.get());
+        assert_eq!(forward.value.as_f64(), reversed_outcome.value.as_f64());
     }
 
     proptest::proptest! {
@@ -594,7 +721,7 @@ mod tests {
                 &permuted_losses, &permuted_scores, &permuted_weights, test_score, test_w, g,
             ).unwrap();
 
-            proptest::prop_assert_eq!(original.value.get(), permuted.value.get());
+            proptest::prop_assert_eq!(original.value.as_f64(), permuted.value.as_f64());
         }
 
         // Redundant with the type system in one sense -- a successful
@@ -628,7 +755,7 @@ mod tests {
             if let Ok(outcome) = weighted_risk_adjusted_evalue(
                 &losses, &scores, &calib_weights, test_score, test_w, g,
             ) {
-                proptest::prop_assert!(outcome.value.get() >= 0.0);
+                proptest::prop_assert!(outcome.value.as_f64() >= 0.0);
             }
         }
     }
