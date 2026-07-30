@@ -85,29 +85,48 @@ m* は Milestone 2 のように事前計算できない — Theorem 4.7 の m* �
 条件が実現された重みに依存するためで、代わりに実行時に「停止時刻」として
 発見し、条件が最初に成立した時点で固定する。`weight_source` は必須で
 暗黙のデフォルトを持たないフィールドであり、`KnownDensityRatio` は
-有限サンプルの保証をフルに与えるが、`Estimated` は漸近的な保証に格下げ
-される — 論文が推定された重みについて有限サンプルの妥当性を示していない
-ため。
+有限サンプルの保証をフルに与えるが、`Estimated` は無条件に
+`EmpiricalOnly`(経験的診断のみ)へ格下げされる — 論文がそもそも
+推定された重みについて一切論じていない(既知のomegaを前提条件として
+扱うのみで、定理自身がそれを緩めることはない)ため、頼れる漸近的論拠が
+存在しない。
 
 Milestone 6 ではさらに、分布シフト下での重み付き SCoRE-MDR
 `risksieve::selective::evalue_weighted::weighted_risk_adjusted_evalue` と
 `risksieve::selective::mdr::certify_weighted` を追加した(Bai and Jin
-(2026) の Equation 6.1、Theorem 6.2・6.4)。分布シフト下anytime
-controllerと同じ `weight_source` による保証の切り替え
-(`KnownDensityRatio` → `MarginalDeploymentRisk`、`Estimated` →
-`Asymptotic`)を、anytimeではなく固定サンプルのデプロイ判定に適用したもの。
-キャリブレーション点はテスト点だけでなく個別に重み付けされ(`w(X_i)`)、
-重みには正規化の要件がない — 全ての重み(キャリブレーションとテスト点)を
-同じ正の定数で一律にリスケールしてもe値は不変だが、不均一な再重み付けに
-対しては不変ではない。e値は、狭く非退化な特定のケースで
-`f64::INFINITY` になり得る(oracle fixtureを生成する過程で見つかった
-具体的な事例であり、仮説上のものではない — `docs/references.md`の
-「Equation 6.1 audit」を参照)。これは大きな有限値へクランプするのではなく、
-専用の `EValue` 型(`Finite(NonNegative)` / `PositiveInfinity`)で表現
-している。`Tian-Bai/SCoRE` 自身の `SCoRE_MDR_w` との照合(35件の
-fixture、`tests/score_mdr_w_oracle.rs` — 公式パッケージには重み付きe値
-関数自体が存在しないため、1件につき2種類の独立した比較を実施)と、
-重み付きMDR保証そのもののモンテカルロ・シミュレーション
+(2026) の Equation 6.1、Theorem 6.2・6.4)。`KnownDensityRatio` は
+`MarginalDeploymentRisk`(unweighted MDRと同じ有限サンプル保証)を返す。
+`Estimated` は、Theorem 6.4の4条件——calibrationから独立に学習された
+weight estimator、L2(P_X)一致性(`WeightConsistencyEvidence`)、論文の
+閾値関数の正則性(`ThresholdRegularityEvidence`)、そして`gamma == alpha`
+の厳密な一致——が**すべて**宣言された場合に限り`Asymptotic`を返し、
+一つでも欠ければ`EmpiricalOnly`へ格下げする。これは
+`risksieve::anytime::AnytimeShiftedController`(上記、無条件に
+`EmpiricalOnly`)よりも厳格な、定理ごとの個別判定である——根拠となる
+定理(Theorem 4.7)自体が推定weightの漸近論拠を持たないanytimeの場合と
+異なり、weighted MDRのTheorem 6.4には実際に(条件付きの)漸近論拠が
+存在するため。両コントローラとも
+`ExchangeabilityAssumption::CovariateShiftIid`(calibrationはP、testは
+異なるQからそれぞれi.i.d.)を記録する——両者とも実際には成立しない
+同一分布Iidとは異なる主張である。キャリブレーション点はテスト点だけで
+なく個別に重み付けされ(`w(X_i)`)、重みには正規化の要件がない — 全ての
+重み(キャリブレーションとテスト点)を同じ正の定数で一律にリスケール
+してもe値は不変だが、不均一な再重み付けに対しては不変ではなく、また
+巨大だが有限な重み(例えばf64::MAX付近)がオーバーフローしないよう、
+計算前に全重みをその最大値で正規化している。e値は、狭く非退化な特定の
+ケースで`f64::INFINITY`になり得る(oracle fixtureを生成する過程で
+見つかった具体的な事例であり、仮説上のものではない —
+`docs/references.md`の「Equation 6.1 audit」を参照)。これは大きな
+有限値へクランプするのではなく、専用の`EValue`型(`Finite(NonNegative)`
+/ `PositiveInfinity`)で表現している——この型は`certificate.rs`に
+定義されており、`Diagnostics::risk_adjusted_evalue`がserde機能下で
+`Finite`/`PositiveInfinity`/`None`を区別して往復できる。`Tian-Bai/SCoRE`
+自身の`SCoRE_MDR_w`との照合(38件のfixture、109テスト点、
+`tests/score_mdr_w_oracle.rs` — 公式パッケージには重み付きe値関数自体が
+存在しないため、1件につき2種類の独立した比較を実施。公式判定は
+gammaとalphaの大小に関わらず全ケースで厳密一致を検証しており、これは
+仮定ではなく30万試行のランダム探索で確認済み)と、重み付きMDR保証その
+もののモンテカルロ・シミュレーション
 (`tests/statistical_validity_weighted_mdr.rs`)で検証している。weighted
 SDR は見送った(`docs/roadmap.md` 参照)。
 

@@ -212,42 +212,105 @@ indices and `tau_hat` exactly. There is no independent-construction
 (Equation 4.1) oracle column in this fixture; see `docs/references.md`
 for why `SCoRE_MDR_bf` was found unsuitable as an oracle for it.
 
-Tier 5 also has `tests/score_mdr_w_oracle.rs`, reading 35 cases from
-`tests/fixtures/score_mdr_w_v0_1_1.json`
+Tier 5 also has `tests/score_mdr_w_oracle.rs`, reading 38 cases (109 test
+points) from `tests/fixtures/score_mdr_w_v0_1_1.json`
 (`scripts/oracles/generate_score_mdr_w.py` generates it against the same
 `Tian-Bai/SCoRE` commit and package version). Unlike the SDR oracle, this
 one makes *two* independent comparisons per test point, because the
 official package has no weighted e-value function at all (only
-`SCoRE_MDR_w`, a decision-only shortcut valid for `gamma <= alpha`): the
-e-value itself is checked against the fixture generator's own
+`SCoRE_MDR_w`, a decision-only shortcut valid unconditionally for
+`gamma <= alpha`, with an extra overlap condition for `gamma > alpha`):
+the e-value itself is checked against the fixture generator's own
 from-scratch Python breakpoint-enumeration reference implementation of
 Equation 6.1 (not derived from this crate's Rust code, and not from the
 official package), with a combined absolute/relative tolerance (`1e-9`),
 including exact agreement on a `+infinity` case; the deploy/abstain
-decision is checked against the official `SCoRE_MDR_w` shortcut
-separately, and only for cases where `gamma <= alpha` (its unconditionally
-valid regime). See `docs/references.md` for this asymmetry and why it
-exists.
+decision is checked against the official `SCoRE_MDR_w` shortcut exactly,
+for *every* case, `gamma <= alpha` or not — this crate's own construction
+never takes the shortcut, so a 300,000-trial randomized search (not mere
+assumption) confirmed its decision needs no help from the shortcut's own
+`gamma > alpha` overlap condition to already agree with it, including on
+two fixture cases specifically constructed to exercise both outcomes of
+that condition. See `docs/references.md`'s "Equation 6.1 audit" for this
+design and the floating-point boundary bug in the fixture generator's own
+reference implementation that building those cases surfaced (fixed with
+the same `feasibility_epsilon` tolerance pattern the Rust code already
+uses).
 
-Tier 6 (regressions) has one entry: `risk_adjusted_evalue`
-(`src/selective/evalue.rs`, Equation 4.1) grouped tied calibration scores
-via a sort keyed on score alone, leaving its summed loss dependent on the
-caller's input order rather than only on the calibration multiset — found
-while building the weighted e-value construction, which needed
-`risk_adjusted_evalue` to be genuinely order-invariant for a "weight `1`
-matches unweighted" test to be meaningful. No public guarantee was
-misstated (the affected quantity is an internal summation step, not a
-part of any theorem statement), but the *specific returned e-value* could
-differ by a few ULPs depending on input order for adversarial tied
-inputs. Fixed by sorting by `(score, loss)` and Kahan-summing within
-canonical groups; regression test
-`ties_are_summed_in_a_canonical_order_not_input_order` in
-`src/selective/evalue.rs` checks forward, reversed, and permuted input
-now agree bit-exactly. See `CHANGELOG.md`'s `Fixed` section. Each
-remaining tier or per-milestone gap activates as the work in
-`docs/roadmap.md` that needs it lands; this file will list the actual
-test names and fixture locations as they are added, rather than
-describing them abstractly.
+Tier 6 (regressions) has six entries so far, all found while building
+weighted MDR:
+
+1. `risk_adjusted_evalue` (`src/selective/evalue.rs`, Equation 4.1)
+   grouped tied calibration scores via a sort keyed on score alone,
+   leaving its summed loss dependent on the caller's input order rather
+   than only on the calibration multiset — found while building the
+   weighted e-value construction, which needed `risk_adjusted_evalue` to
+   be genuinely order-invariant for a "weight `1` matches unweighted"
+   test to be meaningful. No public guarantee was misstated (the affected
+   quantity is an internal summation step, not a part of any theorem
+   statement), but the *specific returned e-value* could differ by a few
+   ULPs depending on input order for adversarial tied inputs. Fixed by
+   sorting by `(score, loss)` and Kahan-summing within canonical groups;
+   regression test `ties_are_summed_in_a_canonical_order_not_input_order`
+   in `src/selective/evalue.rs` checks forward, reversed, and permuted
+   input now agree bit-exactly.
+2. `selective::mdr::certify_weighted` returned `GuaranteeKind::Asymptotic`
+   for *any* `ImportanceWeightSource::Estimated`, regardless of whether
+   Theorem 6.4's four hypotheses actually held — a genuine guarantee
+   overstatement, not merely an internal detail. Fixed by adding typed
+   `consistency`/`threshold_regularity` evidence fields and downgrading to
+   `EmpiricalOnly` unless every hypothesis (including `gamma == alpha`
+   exactly) is declared true; see
+   `estimated_weight_with_full_theorem_6_4_conditions_reaches_asymptotic`
+   and its four sibling tests in `src/selective/mdr.rs`.
+3. `anytime::AnytimeShiftedController::update` made the identical
+   overstatement for its own `Estimated` case, but with no theorem at all
+   to fall back on (Theorem 4.7 never discusses estimated weights). Fixed
+   to downgrade unconditionally to `EmpiricalOnly`; see
+   `estimated_weight_source_downgrades_to_empirical_only` in
+   `src/anytime/shifted.rs` and
+   `anytime_theorem_4_7_estimated_weights_yield_empirical_only_not_high_probability`
+   in `tests/paper_anytime_shifted.rs`.
+4. Both of the controllers above recorded
+   `Assumptions::exchangeability` as `ExchangeabilityAssumption::Iid`
+   under covariate shift, which asserts calibration and test are drawn
+   from the *same* distribution — the wrong claim when they are drawn
+   from two different ones. Fixed by adding
+   `ExchangeabilityAssumption::CovariateShiftIid` and using it in both
+   places; see `weighted_exchangeability_is_covariate_shift_iid_not_plain_iid`
+   and `exchangeability_is_covariate_shift_iid_not_plain_iid`.
+5. `weighted_risk_adjusted_evalue` computed at the caller's raw weight
+   scale, so finite-but-huge weights (both near `f64::MAX`) could
+   overflow `total_weight` to `+infinity`, spuriously producing
+   `EValue::PositiveInfinity` for a genuinely finite e-value. Fixed by
+   normalizing every weight by their shared maximum first, exploiting the
+   construction's own proven uniform-scale invariance — which in turn
+   exposed a second, latent bug (the normalized weight sum was summed in
+   caller order, not canonical order, so it was never truly
+   permutation-invariant; the extra rounding from normalization was
+   enough to surface a 1-ULP mismatch a proptest already covered). Fixed
+   with the same canonical-order-before-summing pattern used for tied
+   score groups; see
+   `huge_but_finite_weights_do_not_spuriously_overflow_to_infinity` and
+   `construction_is_permutation_invariant` in
+   `src/selective/evalue_weighted.rs`.
+6. This fixture generator's own `weighted_evalue_reference` (a from-scratch
+   Python reference, not the official package or this crate's Rust code)
+   had no epsilon tolerance on its feasibility comparison, so a breakpoint
+   computed to satisfy `F(t;l) <= gamma` with exact equality could be
+   incorrectly rejected after floating-point rounding, silently missing
+   the true infimum. A 200,000-trial search surfaced 69 disagreements
+   against the official decision before the fix; hand-deriving the true
+   e-value for the smallest failing case confirmed the bug was in the
+   reference script, not in the Rust crate (which already carries this
+   tolerance) or the official package. Fixed with the identical
+   `feasibility_epsilon` pattern; a 300,000-trial re-check found zero
+   further mismatches. See `docs/references.md`'s "Equation 6.1 audit".
+
+See `CHANGELOG.md`'s `Fixed` section for all six. Each remaining tier or
+per-milestone gap activates as the work in `docs/roadmap.md` that needs it
+lands; this file will list the actual test names and fixture locations as
+they are added, rather than describing them abstractly.
 
 ## Timing comparison: coupled vs. independent SDR (informal)
 

@@ -95,29 +95,52 @@ here cannot be precomputed the way Milestone 2's is, since Theorem 4.7's
 discovered at runtime as a stopping time, frozen the first time its
 condition holds. `weight_source` is a required, never-defaulted field —
 `KnownDensityRatio` gives the full finite-sample guarantee, `Estimated`
-downgrades to an asymptotic one, since the paper does not establish
-finite-sample validity for estimated weights.
+downgrades to an empirical-only diagnostic unconditionally, since the
+paper never discusses estimated weights at all (it takes the importance
+weight as a standing known hypothesis, not something the theorem
+relaxes) — there is no asymptotic argument here to fall back on, unlike
+weighted MDR's `Estimated` case below.
 
 Milestone 6 also adds `risksieve::selective::evalue_weighted::weighted_risk_adjusted_evalue`
 and `risksieve::selective::mdr::certify_weighted`, weighted SCoRE-MDR
 under covariate shift (Bai and Jin (2026), Equation 6.1, Theorem 6.2 and
-6.4). Same `weight_source`-driven guarantee split as the shifted anytime
-controller (`KnownDensityRatio` -> `MarginalDeploymentRisk`, `Estimated`
--> `Asymptotic`), applied here to a fixed-sample deployment decision
-instead of an anytime one. Calibration points are weighted individually
-(`w(X_i)`), not just the test point, and weights carry no normalization
-requirement — the construction is invariant to rescaling every weight
-(calibration and test) by the same positive constant, but not to a
-non-uniform reweighting. The e-value is `f64::INFINITY` in a narrow,
-non-degenerate case (a concrete instance found while building the oracle
-fixture, not a hypothetical one — see `docs/references.md`'s "Equation
-6.1 audit"), represented by a dedicated `EValue` type
-(`Finite(NonNegative)` / `PositiveInfinity`) rather than clamped to a
-large finite value. Cross-checked against `Tian-Bai/SCoRE`'s own
-`SCoRE_MDR_w` (35 fixture cases, `tests/score_mdr_w_oracle.rs` — two
-independent comparisons per case, since the official package has no
-weighted e-value function of its own to check the e-value against) and
-against a Monte Carlo simulation of the weighted MDR guarantee
+6.4). `KnownDensityRatio` yields `MarginalDeploymentRisk`, the same
+finite-sample guarantee kind as unweighted MDR. `Estimated` yields
+`Asymptotic` only when *every one* of Theorem 6.4's four hypotheses is
+declared true — training data independent of calibration,
+`L2(P_X)`-consistency of the weight estimator (`WeightConsistencyEvidence`),
+regularity of the paper's threshold function (`ThresholdRegularityEvidence`),
+and `gamma == alpha` exactly — downgrading to `EmpiricalOnly` otherwise.
+This is a stricter, theorem-by-theorem check, not a blanket
+`Estimated -> Asymptotic` rule: `risksieve::anytime::AnytimeShiftedController`
+downgrades every `Estimated` case to `EmpiricalOnly` unconditionally
+instead, because the anytime-valid paper it implements (Hultberg,
+Zachariah, and Ribeiro (2026), Theorem 4.7) has no asymptotic argument for
+estimated weights at all. Both controllers record
+`ExchangeabilityAssumption::CovariateShiftIid` (calibration i.i.d. from
+`P`, test i.i.d. from a different `Q`), distinct from the plain `Iid`
+(same distribution) claim neither setting actually satisfies. Calibration
+points are weighted individually (`w(X_i)`), not just the test point, and
+weights carry no normalization requirement — the construction is
+invariant to rescaling every weight (calibration and test) by the same
+positive constant, but not to a non-uniform reweighting, and every weight
+is normalized by their shared maximum before computation so that
+finite-but-huge weights (for example near `f64::MAX`) cannot spuriously
+overflow it. The e-value is `f64::INFINITY` in a narrow, non-degenerate
+case (a concrete instance found while building the oracle fixture, not a
+hypothetical one — see `docs/references.md`'s "Equation 6.1 audit"),
+represented by a dedicated `EValue` type (`Finite(NonNegative)` /
+`PositiveInfinity`) rather than clamped to a large finite value; this
+type lives in `certificate.rs` so `Diagnostics::risk_adjusted_evalue` can
+use it directly, round-tripping `Finite`/`PositiveInfinity`/`None`
+distinctly under the `serde` feature. Cross-checked against
+`Tian-Bai/SCoRE`'s own `SCoRE_MDR_w` (38 fixture cases, 109 test points,
+`tests/score_mdr_w_oracle.rs` — two independent comparisons per case,
+since the official package has no weighted e-value function of its own to
+check the e-value against; the official decision is compared exactly for
+every case regardless of `gamma` vs `alpha`, confirmed by a 300,000-trial
+randomized search rather than assumed) and against a Monte Carlo
+simulation of the weighted MDR guarantee
 (`tests/statistical_validity_weighted_mdr.rs`). Weighted SDR is deferred;
 see `docs/roadmap.md`.
 

@@ -9,13 +9,13 @@ statistical library can overstate what it proves — see AGENTS.md section 4.
 
 | Field | Meaning | Category |
 |---|---|---|
-| `exchangeability` | Calibration and test data are i.i.d. or only exchangeable | caller-declared, not checkable from observed data — the *scope* this covers differs by controller: one test point plus calibration (`n+1`) for `crc`, `anytime`, `nonmonotone`, and `selective::mdr`, but the *entire batch* plus calibration (`n+m`) for `selective::sdr`, a strictly stronger requirement (see Status below) |
+| `exchangeability` | Calibration and test data are i.i.d., only exchangeable, or i.i.d. within each of two different (covariate-shifted) distributions | caller-declared, not checkable from observed data — the *scope* this covers differs by controller: one test point plus calibration (`n+1`) for `crc`, `anytime`, `nonmonotone`, and `selective::mdr`, but the *entire batch* plus calibration (`n+m`) for `selective::sdr`, a strictly stronger requirement (see Status below). `CovariateShiftIid` is a distinct claim from `Iid`, not a special case of it: calibration and test are each i.i.d. *separately*, but from two different distributions, so the combined sample is not identically distributed the way plain `Iid` asserts |
 | `bounded_loss` | The interval the loss is contractually confined to | checked at runtime by [`BoundedLoss::evaluate_checked`](../src/loss.rs) |
 | `monotonicity` | Whether, and in which direction, the loss is monotone in the parameter | caller-declared for now; a future milestone may add a runtime monotonicity check over the observed calibration grid |
 | `right_continuity` | Whether the relevant statistic is right-continuous, as some threshold-search arguments require | caller-declared, not checkable from finitely many observations |
 | `symmetry` | Whether the optimization procedure is permutation-invariant | proven by construction for symmetric primitives the library ships; caller-declared (`CallerAsserted`) for optimizers supplied by the caller |
 | `stability` | Evidence behind a beta-stability constant | `Analytic` is proven by an external reference; `UserSupplied` is caller-declared; `Estimated` is computed by the library from data but is itself only an estimate, not a proof |
-| `shift` | Whether, and how, covariate shift is corrected for | `NoShift` is caller-declared; `CovariateShift` further distinguishes `KnownDensityRatio` (caller-declared as known, backs `AnytimeHighProbability` in `anytime::AnytimeShiftedController` and `MarginalDeploymentRisk` in `selective::mdr::certify_weighted`) from `Estimated` (caller-declared as an estimate, backs only `Asymptotic` in both) |
+| `shift` | Whether, and how, covariate shift is corrected for | `NoShift` is caller-declared; `CovariateShift` further distinguishes `KnownDensityRatio` (caller-declared as known) from `Estimated` (caller-declared, now further broken into `method`, `training_data_separate_from_calibration`, `consistency`, and `threshold_regularity` — see Status below for how each controller uses these fields differently) |
 
 ## The four categories
 
@@ -78,15 +78,22 @@ property of their own is not entitled to assume this holds. See
 
 `anytime::AnytimeShiftedController` (Milestone 6) is the first controller
 to populate `shift` with anything other than `NoShift`. Its
-`exchangeability` is `Iid`, matching the unshifted `AnytimeController`
-(the shift is between calibration and test *distributions*, corrected via
-`shift`, not a claim about dependence structure). `shift` is
-`CovariateShift { weight_source }`, taken directly from the caller's
-`weight_source(...)` builder call — a caller-declared choice that
-directly determines the certificate's `GuaranteeKind`
-(`AnytimeHighProbability` for `KnownDensityRatio`, `Asymptotic` for
-`Estimated`), not merely descriptive metadata the way most other fields
-are for other controllers.
+`exchangeability` is `CovariateShiftIid`, *not* the unshifted
+`AnytimeController`'s plain `Iid`: the shift is between calibration and
+test *distributions* (`P` vs. the paper's `P*`), so asserting `Iid`
+(same distribution) would misstate exactly the thing `shift` is there to
+correct for. `shift` is `CovariateShift { weight_source }`, taken
+directly from the caller's `weight_source(...)` builder call — a
+caller-declared choice that directly determines the certificate's
+`GuaranteeKind`: `AnytimeHighProbability` for `KnownDensityRatio`, and
+`EmpiricalOnly` for `Estimated` *unconditionally*, regardless of what its
+`consistency`/`threshold_regularity` fields declare — Hultberg,
+Zachariah, and Ribeiro (2026), Theorem 4.7 has no asymptotic argument for
+estimated weights at all (it takes `omega` as known, a standing
+hypothesis, not something the theorem relaxes), so there is nothing for
+those fields to unlock here. They exist to support
+`selective::mdr::certify_weighted`'s own hypothesis check below, not this
+controller's.
 
 `selective::mdr::certify_weighted` (Milestone 6, Equation 6.1) sets the
 same `monotonicity`/`right_continuity`/`stability` defaults as
@@ -95,10 +102,23 @@ decision, no parameter search), and `symmetry` is `ProvenSymmetric` for
 the same reason (Equation 6.1 depends on calibration only as a multiset
 of `(score, weight, loss)` triples — checked by a permutation property
 test in `src/selective/evalue_weighted.rs`). Unlike `mdr::certify`,
-`exchangeability` is `Iid`, not `Exchangeable`: Assumption 6.1 states
-i.i.d. draws within each of the calibration (`P`) and test (`Q`)
-distributions, not mere exchangeability. `shift` is
-`CovariateShift { weight_source }`, taken directly from the caller's
-`weight_source` argument — the same caller-declared,
-directly-guarantee-determining pattern as `AnytimeShiftedController`
-above, now for a fixed-sample rather than anytime-valid certificate.
+`exchangeability` is `CovariateShiftIid`, not `Exchangeable`: Assumption
+6.1 states i.i.d. draws within each of the calibration (`P`) and test
+(`Q`) distributions, not mere exchangeability, and not plain `Iid` either
+since `P != Q`. `shift` is `CovariateShift { weight_source }`, taken
+directly from the caller's `weight_source` argument. Unlike
+`AnytimeShiftedController`, this controller's `Estimated` case *can*
+reach `Asymptotic` — but only when every one of Bai and Jin (2026)
+Theorem 6.4's four hypotheses is declared true:
+`training_data_separate_from_calibration`, `consistency`
+(`WeightConsistencyEvidence::Asserted`), `threshold_regularity`
+(`ThresholdRegularityEvidence::Asserted`), and the caller passing
+`gamma == alpha` exactly (checked as exact `f64` equality, the
+conservative direction: a near-but-not-identical value does not count).
+Any one missing downgrades to `EmpiricalOnly` instead of erroring — a
+real deploy/abstain decision still comes out of the same e-value
+computation, just without a theorem attached to it, the same choice
+`nonmonotone::stability::certify` makes for `StabilityEvidence::Estimated`
+without its full analytic hypothesis. Declaring any of these fields true
+is the caller's assertion; none of them is verified by this crate from
+data.

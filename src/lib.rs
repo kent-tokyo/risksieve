@@ -105,9 +105,19 @@
 //!   Zachariah, and Ribeiro (2026), Theorem 4.7 — importance-weighted
 //!   anytime-valid risk control, with weight validation and diagnostics
 //!   in [`shift::importance`], `m*` discovered at runtime as a stopping
-//!   time on the realized weights, and a [`guarantee::GuaranteeKind::Asymptotic`]
-//!   downgrade for [`guarantee::ImportanceWeightSource::Estimated`]
-//!   weights. Weighted SCoRE is not implemented yet.
+//!   time on the realized weights, and an unconditional
+//!   [`guarantee::GuaranteeKind::EmpiricalOnly`] downgrade for
+//!   [`guarantee::ImportanceWeightSource::Estimated`] weights (Theorem 4.7
+//!   never discusses estimated weights at all, so there is no asymptotic
+//!   argument to fall back on). [`selective::evalue_weighted::weighted_risk_adjusted_evalue`]
+//!   and [`selective::mdr::certify_weighted`] implement Bai and Jin
+//!   (2026)'s weighted SCoRE-MDR (Equation 6.1, Theorem 6.2/6.4), whose
+//!   own `Estimated` case *can* reach
+//!   [`guarantee::GuaranteeKind::Asymptotic`] — but only when every one
+//!   of Theorem 6.4's hypotheses is declared true (a strictly narrower
+//!   condition than the anytime controller's, since it is a different
+//!   theorem from a different paper). Weighted SDR is not implemented
+//!   yet.
 //! - Milestone 7 (downstream examples) is not implemented yet; see
 //!   AGENTS.md section 7 for the planned sequence.
 //!

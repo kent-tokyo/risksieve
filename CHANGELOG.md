@@ -308,63 +308,94 @@ All notable changes to `risksieve` are documented here. Format follows
   around it (weight `1` is not special-cased into the unweighted code
   path, to avoid silently coupling their rounding behavior). Calibration
   points are weighted individually (`w(X_i)`), not just the test point.
-  Introduces `EValue` (`Finite(NonNegative)` / `PositiveInfinity`): unlike
-  Equation 4.1, whose infimum is provably always finite, Equation 6.1's
-  can be `+infinity` when the test point's own contribution to the
-  weighted denominator is zero while its numerator can still clear the
-  deployment threshold — found as a concrete reproducer while generating
-  the oracle fixture below, not a hypothetical case, and represented
-  faithfully rather than clamped to a large finite value. Invariant to
-  rescaling every weight (calibration and test) by the same positive
-  constant; not invariant to non-uniform reweighting (verified by a
-  proptest that also confirms the invariance property isn't vacuous).
+  Introduces `EValue` (`Finite(NonNegative)` / `PositiveInfinity`, defined
+  in `certificate.rs` and re-exported at this module's path for backward
+  compatibility, so `Diagnostics::risk_adjusted_evalue` can use it without
+  a dependency from the foundational `certificate` module onto this
+  Milestone-6-specific one): unlike Equation 4.1, whose infimum is
+  provably always finite, Equation 6.1's can be `+infinity` when the test
+  point's own contribution to the weighted denominator is zero while its
+  numerator can still clear the deployment threshold — found as a
+  concrete reproducer while generating the oracle fixture below, not a
+  hypothetical case, and represented faithfully rather than clamped to a
+  large finite value. Invariant to rescaling every weight (calibration
+  and test) by the same positive constant; not invariant to non-uniform
+  reweighting (verified by a proptest that also confirms the invariance
+  property isn't vacuous). Every weight is normalized by their shared
+  maximum before any other computation, so this invariance is not just a
+  proven property but an actively-relied-upon numerical safeguard: finite
+  but huge weights (for example both near `f64::MAX`) can otherwise
+  overflow `total_weight` to `+infinity` and spuriously trigger the
+  `EValue::PositiveInfinity` case for what is, once the shared scale
+  cancels, a genuinely finite e-value.
+- `risksieve::guarantee::WeightConsistencyEvidence` and
+  `ThresholdRegularityEvidence`: typed, caller-declared evidence for
+  Theorem 6.4's two population-level hypotheses (`L2(P_X)`-consistency of
+  an estimated weight sequence; continuity and strict monotonicity of the
+  paper's `F` at `t*`), added as fields of
+  `ImportanceWeightSource::Estimated` alongside the existing `method` and
+  `training_data_separate_from_calibration`. Neither is checkable by this
+  crate from a single realized estimate — both follow the same
+  caller-declared-evidence pattern as `SymmetryAssumption::CallerAsserted`
+  and `StabilityEvidence::UserSupplied`.
+- `risksieve::guarantee::ExchangeabilityAssumption::CovariateShiftIid`:
+  calibration i.i.d. from `P`, test i.i.d. from a *different* distribution
+  `Q`, related by a declared covariate-shift assumption (Bai and Jin 2026,
+  Assumption 6.1; Hultberg, Zachariah, and Ribeiro 2026, Section 4.2) —
+  distinct from the existing `Iid` variant, which asserts calibration and
+  test are drawn from the *same* distribution and does not apply to
+  either shifted setting.
 - `risksieve::selective::mdr::certify_weighted`: the weighted extension of
   Algorithm 1 (SCoRE-MDR) for one test point under covariate shift, taking
   an explicit, never-defaulted `ImportanceWeightSource`. Produces
   `GuaranteeKind::MarginalDeploymentRisk` for `KnownDensityRatio` (Theorem
-  6.2's finite-sample hypothesis) and downgrades to `GuaranteeKind::Asymptotic`
-  for `Estimated` (Theorem 6.4's `limsup` conclusion) — the same downgrade
-  pattern `AnytimeShiftedController` already applies for Theorem 4.7's
-  analogous split. `Assumptions::exchangeability` is `Iid`, not
-  `Exchangeable` (Assumption 6.1 states i.i.d. draws within each of the
-  calibration and test distributions). Records the same weight diagnostics
+  6.2's finite-sample hypothesis). For `Estimated`, produces
+  `GuaranteeKind::Asymptotic` **only** when *every one* of Theorem 6.4's
+  four hypotheses is declared true —
+  `training_data_separate_from_calibration`, `consistency`, and
+  `threshold_regularity` all hold, *and* the caller passed `gamma == alpha`
+  exactly (checked as exact `f64` equality, not an approximate comparison)
+  — and downgrades to `GuaranteeKind::EmpiricalOnly` otherwise (a real
+  deploy/abstain decision is still returned, just without a theorem
+  attached to it — the same choice `nonmonotone::stability::certify` makes
+  for `StabilityEvidence::Estimated`). `Assumptions::exchangeability` is
+  `CovariateShiftIid`. Records the same calibration-only weight diagnostics
   (`weight_sum`, `weight_sum_of_squares`, `effective_sample_size`,
-  `weight_range`) as `AnytimeShiftedController`. Single test point per
-  call, matching Equation 6.1's own shape, rather than a batch API (the
-  batch/eBH-selection extension is weighted SDR, out of scope here — see
-  `docs/roadmap.md`).
+  `weight_range`) as `AnytimeShiftedController`, plus a new
+  `Diagnostics::test_weight` recording the test point's own weight
+  separately, since it is not folded into those calibration-only
+  statistics but does enter Equation 6.1's shared normalizing constant.
+  Single test point per call, matching Equation 6.1's own shape, rather
+  than a batch API (the batch/eBH-selection extension is weighted SDR,
+  out of scope here — see `docs/roadmap.md`).
 - `scripts/oracles/generate_score_mdr_w.py` and
   `tests/fixtures/score_mdr_w_v0_1_1.json`: a cross-language oracle
   fixture generated against `Tian-Bai/SCoRE` (commit
   `401b7caf6d030825ff67e8f08e44ba15ee8c94af`, package version `0.1.1`),
   covering all-weights-1, calibration-only/test-only/both non-uniform,
   zero-weight, score/weight ties, all-zero/all-one-loss, empty-batch,
-  zero/all-selection, extreme weight ratio, uniform weight rescale, and a
-  `gamma > alpha` case, plus 20 fixed-seed randomized cases (35 total).
-  Unlike the SDR oracle, this one makes two independent comparisons per
-  case rather than one, since the official package has no weighted
-  e-value function of its own: the e-value itself is checked against the
-  fixture generator's own from-scratch Python reference implementation of
-  Equation 6.1, and the deploy/abstain decision is checked separately
-  against the official `SCoRE_MDR_w` shortcut, only for cases with
-  `gamma <= alpha` (its documented, unconditionally-valid regime). Reuses
-  `scripts/score_provenance.py`'s fail-fast checkout verification. See
-  `docs/references.md`'s "Equation 6.1 audit" for the full correspondence;
-  no formula discrepancy was found against either comparison target.
+  zero/all-selection, extreme weight ratio, uniform weight rescale, an
+  overflow-adversarial case (weights near `f64::MAX`), and three
+  `gamma > alpha` cases (one ordinary, one where the official shortcut's
+  overlap condition flips its naive decision, one where it doesn't), plus
+  20 fixed-seed randomized cases split between `gamma <= alpha` and
+  `gamma > alpha` (38 total). Unlike the SDR oracle, this one makes two
+  independent comparisons per case rather than one, since the official
+  package has no weighted e-value function of its own: the e-value itself
+  is checked against the fixture generator's own from-scratch Python
+  reference implementation of Equation 6.1, and the deploy/abstain
+  decision is checked against the official `SCoRE_MDR_w` shortcut,
+  exactly, for *every* case regardless of `gamma` vs `alpha` — this
+  crate's own construction never takes the shortcut, so its decision does
+  not need the shortcut's extra `gamma > alpha` overlap condition to
+  already agree with it (confirmed by a 300,000-trial randomized search,
+  not assumed). Reuses `scripts/score_provenance.py`'s fail-fast checkout
+  verification. See `docs/references.md`'s "Equation 6.1 audit" for the
+  full correspondence; no formula discrepancy was found against either
+  comparison target.
 - `tests/score_mdr_w_oracle.rs`: reads the fixture above (Python is never
-  invoked by `cargo test`); all 35 cases (106 test points) match the
-  reference e-values, and the 34 of 35 cases (104 of 106 test points)
-  with `gamma <= alpha` also match the official decision exactly — the
-  remaining case has `gamma > alpha` by design and so has no decision
-  comparison at all.
-- Documented (and covered by a regression test,
-  `certificate_serde_round_trip_does_not_preserve_positive_infinity`) a
-  narrow, pre-existing `serde` limitation surfaced by `EValue`: `serde_json`
-  serializes `Some(f64::INFINITY)` as `null`, so
-  `Diagnostics::risk_adjusted_evalue` cannot be told apart from "not
-  computed" after a round trip when the weighted e-value is genuinely
-  unbounded. Only this auxiliary diagnostic is affected; the certified
-  `parameter` (the actual deploy decision) round-trips correctly.
+  invoked by `cargo test`); all 38 cases (109 test points) match the
+  reference e-values, and every case's official decision matches exactly.
 - `tests/statistical_validity_weighted_mdr.rs`: a Monte Carlo check for
   Theorem 6.2, with a deliberately non-vacuous data-generating process — a
   decoupled score coordinate (identical under calibration and test) and
@@ -410,6 +441,72 @@ All notable changes to `risksieve` are documented here. Format follows
   for calibration sets with ties at an identical score and specific
   non-representable loss values can differ from before this fix (and only
   by ULPs).
+- `risksieve::selective::mdr::certify_weighted` was returning
+  `GuaranteeKind::Asymptotic` for *any* `ImportanceWeightSource::Estimated`,
+  regardless of whether Theorem 6.4's actual hypotheses held (weight
+  estimator trained independent of calibration, `L2(P_X)`-consistent,
+  Theorem 6.4's threshold-regularity condition, and `gamma == alpha`) —
+  overstating the guarantee for a caller who declared `Estimated` without
+  meeting all four. Fixed by extending `Estimated` with typed
+  `consistency`/`threshold_regularity` evidence fields and only returning
+  `Asymptotic` when every hypothesis is declared true, downgrading to
+  `EmpiricalOnly` otherwise. Verified against the paper's exact wording
+  (re-fetched arXiv:2603.24704, Theorem 6.4) before implementing, not
+  inferred from an earlier paraphrase.
+- `risksieve::anytime::AnytimeShiftedController::update` was also
+  returning `GuaranteeKind::Asymptotic` for any `Estimated` weight source,
+  but Hultberg, Zachariah, and Ribeiro (2026), Theorem 4.7 (re-fetched and
+  read in full to confirm) never discusses estimated weights at all — it
+  takes the importance weight as a standing known hypothesis, not
+  something the theorem relaxes — so there was no asymptotic argument
+  backing that claim in the first place. Fixed to downgrade every
+  `Estimated` case there to `EmpiricalOnly` unconditionally.
+- Both `certify_weighted` and `AnytimeShiftedController::update` were
+  recording `Assumptions::exchangeability` as `ExchangeabilityAssumption::Iid`,
+  which asserts calibration and test are drawn from the *same*
+  distribution — the wrong claim for a covariate-shift setting, where
+  they are drawn from two different distributions `P` and `Q`. Fixed by
+  adding `ExchangeabilityAssumption::CovariateShiftIid` and using it in
+  both places instead.
+- `weighted_risk_adjusted_evalue` computed `total_weight` and every
+  weighted loss at the caller's raw weight scale, so finite-but-huge
+  weights (for example both near `f64::MAX`) could overflow to
+  `+infinity`, spuriously producing `EValue::PositiveInfinity` for what
+  is, once the shared weight scale is factored out, a genuinely finite
+  e-value (confirmed with an exact `f64::MAX`/`f64::MAX` regression case
+  whose true e-value is `2.0`). Fixed by normalizing every weight
+  (calibration and test alike) by their shared maximum before any other
+  computation, exploiting the construction's own proven uniform-scale
+  invariance. This also exposed a second, latent bug: the normalized
+  weight sum was accumulated in caller-supplied order rather than a
+  canonical sorted order, so it was never truly permutation-invariant (it
+  only "got lucky" with small-integer test weights before; the extra
+  rounding from normalization was enough to surface a 1-ULP mismatch).
+  Fixed with the same canonical-order-before-summing pattern already used
+  for tied score groups.
+- `Diagnostics::risk_adjusted_evalue` was a plain `Option<f64>`, so a
+  `+infinity` weighted e-value round-tripped through `serde_json` as
+  `null` — indistinguishable from "not computed". Fixed by retyping it to
+  `Option<EValue>`, which round-trips `Finite`, `PositiveInfinity`, and
+  `None` distinctly, using ordinary tagged-enum JSON (no reliance on a
+  non-standard bare `Infinity` token).
+- The weighted-MDR oracle's own from-scratch Python reference
+  implementation (`weighted_evalue_reference` in
+  `scripts/oracles/generate_score_mdr_w.py`) had no epsilon tolerance on
+  its feasibility comparison, so a breakpoint computed to satisfy
+  `F(t;l) <= gamma` with exact equality could land a few ULPs past
+  `gamma_scaled` after floating-point rounding and be incorrectly
+  rejected, silently missing the true infimum. Found while building
+  targeted `gamma > alpha` oracle fixtures (a 200,000-trial randomized
+  search surfaced a disagreement between this reference and the official
+  `SCoRE_MDR_w` decision); confirmed by hand-deriving the true e-value for
+  the exact failing case and finding it matched the Rust implementation
+  and the official decision, not the buggy reference — so the bug was in
+  the reference script, not in `weighted_risk_adjusted_evalue` or in
+  `SCoRE_MDR_w`. Fixed with the same epsilon-tolerance pattern
+  (`feasibility_epsilon`) already used in `evalue.rs` and
+  `evalue_weighted.rs`; a 300,000-trial re-check after the fix found zero
+  further mismatches.
 
 ### Not yet implemented
 
