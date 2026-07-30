@@ -83,7 +83,7 @@ All notable changes to `risksieve` are documented here. Format follows
   independent fetches and is an exact (non-asymptotic) result, unlike the
   paper's Proposition 2 (bounded-loss discretization), which was deferred
   because its stated guarantee is an `Õ(1/√n)` Lambert-W-function bound
-  extracted with lower confidence — see `tasks/todo.md`.
+  extracted with lower confidence — see `docs/roadmap.md`.
 - `Diagnostics::asserted_reference_bound`: records the caller-asserted
   reference-algorithm risk bound that `nonmonotone::stability::certify`'s
   Theorem 1 hypothesis depends on, so it remains auditable from the
@@ -136,7 +136,7 @@ All notable changes to `risksieve` are documented here. Format follows
   Proposition 4.4's efficient shortcut (valid for `gamma <= alpha`) is
   verified against the general computation by a property test but not
   wired in as a separate code path (AGENTS.md's Milestone 4 requirement
-  to build the transparent reference first); see `tasks/todo.md`.
+  to build the transparent reference first); see `docs/roadmap.md`.
 - `tests/paper_score_mdr.rs`: two hand-derived `n=1` fixtures worked
   through step by step in comments, plus a test distinguishing "no
   feasible threshold" from a genuinely informative zero e-value.
@@ -154,27 +154,45 @@ All notable changes to `risksieve` are documented here. Format follows
   "top-`tau_hat`" slice of the sorted list (those differ exactly at
   ties). An empty input returns an empty, valid selection rather than an
   error.
+- `risksieve::selective::coupled::coupled_risk_adjusted_evalues`: the
+  paper's own cross-test-point-coupled e-value (Bai and Jin (2026),
+  Equation 5.1, Theorem 5.1, and Algorithm 3's efficient computation),
+  independently derived from the equation rather than translated from
+  the official `SCoRE_SDR` Python implementation, in
+  `O((n+m) log(n+m) + m(n+m))`. Groups pooled calibration-and-test scores
+  into distinct sorted values before computing any prefix sum (rather
+  than sorting a tuple list with duplicates and correcting for ties
+  afterward, as the official implementation does); sums a tied score
+  group's calibration losses in a canonical `(score, loss)` order (via
+  `f64::total_cmp`), not input order, so the result is bit-exact under
+  any permutation of the calibration input; computes the `FR_0`/`FR_1`
+  feasibility checks via cross-multiplied comparisons to avoid a
+  division; and clamps the `ell_bar` breakpoint value to `[0, 1]` before
+  evaluating the objective, matching Equation 5.1's stated domain exactly
+  — a deliberate divergence from `SCoRE_SDR`, which does not clamp it
+  (confirmed by a 50,000-trial comparison, reproducible via
+  `scripts/audits/compare_score_reference.py`, to change no output).
+  Accepts `gamma: OpenUnitInterval`, narrower than the paper's stated
+  `gamma > 0` for this construction, for reasons recorded in the module
+  docs and `docs/references.md` (oracle parity, API consistency with
+  Equation 4.1's `gamma`, and a proof that `gamma = 0` is the only point
+  where the e-value's true infimum can be `+infinity`).
 - `risksieve::selective::sdr::certify`: SCoRE-SDR (Algorithm 2) over a
-  batch of test points, composing `ebh::select` with Milestone 4's
-  `evalue::risk_adjusted_evalue` applied independently to each test
-  point. This is a deliberate scope reduction from the paper's own
-  per-test-point e-value (Equation 5.1), which couples each test point's
-  threshold search to every other test point in the batch via a
-  normalizing function that is a ratio of two non-decreasing-in-`t`
-  quantities — unlike Equation 4.1's fixed-denominator sum, this ratio is
-  not obviously monotone in `t`, so the breakpoint-enumeration approach
-  `evalue.rs` uses does not straightforwardly extend, and the paper's own
-  "Algorithm 3" (efficient computation for Equation 5.1) was not
-  extractable in enough detail across several independent, targeted
-  fetches to implement with confidence. Reusing Milestone 4's
-  construction per test point remains a fully valid instantiation of
-  Theorem 3.3 (whose hypothesis only requires each e-value to
-  individually satisfy Definition 3.1) — what is given up is selection
-  power, not correctness; see `tasks/todo.md`. Returns a
+  batch of test points, using the coupled construction above by default
+  and composing it with `ebh::select`. Returns a
   `GuaranteeKind::SelectiveDeploymentRisk` certificate whose `parameter`
   is the sorted-ascending selected indices; an empty selection is a valid
   certificate (`SDR = 0 <= alpha` via the `1 v |R|` denominator), not an
   error. Records `Diagnostics::ebh_tau_hat` for auditability.
+- `risksieve::selective::sdr::certify_independent`: the same batch entry
+  point using `evalue::risk_adjusted_evalue` (Equation 4.1) applied
+  independently to each test point instead, ignoring the rest of the
+  batch — this crate's only SDR construction before the coupled one
+  existed, kept for comparison and backward compatibility, sharing
+  certificate assembly with `certify` through a private helper. Neither
+  construction is claimed to dominate the other in selection power;
+  `docs/references.md` records a fixture where they disagree and one
+  where they coincide by symmetry.
 - `risksieve::selective::sdr::realized_selective_risk`: the post-hoc,
   label-requiring realized selective risk, returning a plain `f64` (never
   a certificate) so it cannot be mistaken for validating the guarantee
@@ -185,10 +203,57 @@ All notable changes to `risksieve` are documented here. Format follows
 - `Diagnostics::ebh_tau_hat`: records the eBH critical value the
   selection hinged on, for the same auditability reason as
   `asserted_reference_bound` and `gamma`.
-- `tests/paper_score_sdr.rs`: a hand-derived `m=3` eBH selection trace, an
-  end-to-end `sdr::certify` trace reusing `mdr.rs`'s own hand-computed
-  e-value fixture across a batch, and the zero-selection/denominator
-  checks named directly in AGENTS.md's Milestone 5 requirements.
+- `scripts/oracles/generate_score_sdr.py` and
+  `tests/fixtures/score_sdr_v0_1_1.json`: a cross-language oracle fixture
+  generated from `Tian-Bai/SCoRE`'s `SCoRE_SDR` (commit
+  `401b7caf6d030825ff67e8f08e44ba15ee8c94af`, package version `0.1.1`),
+  covering hand-computable, tied, shared-score, all-zero/all-one-loss,
+  empty-batch, zero/all-selection, and coupled-vs-independent-disagreement
+  cases plus 20 fixed-seed randomized cases (30 total). The generator
+  verifies the referenced checkout's git HEAD, `SCoRE/SCoRE.py`'s blob
+  SHA, and `SCoRE.__version__` against these pinned values before running
+  (`scripts/score_provenance.py`), failing immediately on any mismatch
+  with no override flag, and writes the actually-measured (not merely
+  assumed) values into the fixture's provenance. No independent
+  (Equation 4.1) oracle column: the official `SCoRE_MDR_bf` brute force
+  was found to diverge from the true infimum in a nontrivial fraction of
+  randomized trials (it only evaluates its objective at `l in {0,1}`,
+  missing interior breakpoints), so it is not used as an oracle —
+  reproducible via `scripts/audits/compare_score_reference.py`; see
+  `docs/references.md` and `THIRD_PARTY_NOTICES.md`.
+- `tests/paper_score_sdr.rs`: a hand-derived `m=3` eBH selection trace, a
+  hand-derived `m=2` coupled e-value trace, an end-to-end
+  `sdr::certify_independent` trace reusing `mdr.rs`'s own hand-computed
+  e-value fixture across a batch, a fixture where the coupled and
+  independent constructions select different sets, and the
+  zero-selection/denominator checks named directly in AGENTS.md's
+  Milestone 5 requirements.
+- `tests/score_sdr_oracle.rs`: opens this crate's tier 5 (cross-language
+  oracle tests). Reads the fixture above (Python is never invoked by
+  `cargo test`) and checks e-values with a combined absolute/relative
+  tolerance and selected indices / `tau_hat` exactly.
+- `tests/statistical_validity.rs`: opens this crate's tier 4 (statistical
+  validity tests). A simple, auditable exchangeable data-generating
+  process (i.i.d. `(U_i, L_i)` with `U_i ~ Uniform(0,1)` as the score and
+  `L_i | U_i ~ Bernoulli(U_i)` as the loss, so any calibration/test split
+  is exchangeable by construction), a hand-rolled SplitMix64 RNG (no new
+  dependency, per AGENTS.md section 12 and this feature's explicit
+  scope), and a Hoeffding-bound acceptance check
+  (`observed_mean_sdr <= alpha + half_width`) rather than a naive
+  `observed <= alpha` assertion. A fast 500-repetition smoke test runs in
+  normal CI; a 20,000-repetition version is `#[ignore]`d. Checks both
+  `sdr::certify` and `sdr::certify_independent`.
+- New property tests for the coupled construction: calibration and
+  test-batch order invariance (including tied score groups, exercised
+  with loss values not exactly representable in binary so a
+  summation-order dependency would actually surface), e-value
+  non-negativity, the `m=1` reduction to Equation 4.1 (proved
+  algebraically in the module docs: with one test point, Equation 5.1's
+  `1 + sum_{k != j}` term has an empty sum and collapses to the constant
+  `1`), and `sdr::certify`'s selected-set / `tau_hat` invariance under
+  permuting the test batch's submission order. No monotonicity/dominance
+  property is asserted between the coupled and independent
+  constructions, since neither the paper nor this crate proves one.
 
 - `risksieve::shift::importance::WeightAccumulator`: non-negative finite
   importance-weight validation (delegated to `NonNegative`) plus
@@ -235,6 +300,13 @@ All notable changes to `risksieve` are documented here. Format follows
   check, and a property test for the non-increasing threshold sequence
   under randomized weights.
 
+- `docs/roadmap.md`: the tracked, publishable backlog that README,
+  rustdoc, and `docs/validation.md` now point to, replacing the local-only
+  `tasks/todo.md` (which is real and still exists locally, but was never
+  committed — `AGENTS.md` is now tracked and un-ignored for the same
+  reason: a contributor cloning this repository from GitHub had no way to
+  read either file before this change).
+
 ### Not yet implemented
 
 Milestone 7 in AGENTS.md section 7 (downstream examples) is still open.
@@ -243,9 +315,10 @@ not implemented. Within Milestone 3, everything beyond Theorem 1 itself
 (Propositions 2-8, Theorem 2) is not implemented. Within Milestone 4,
 Theorem 4.6 (the extra thresholding condition for `gamma > alpha`) is not
 implemented, and Proposition 4.4's shortcut is verified but not wired in
-as a separate code path. Within Milestone 5, Equation 5.1 and Algorithm 3
-(the paper's own cross-test-point-coupled e-value and its efficient
-computation) are not implemented. Within Milestone 6, weighted SCoRE
+as a separate code path. Within Milestone 5, randomized pruning (the
+official implementation's optional `prune='hete'` / `'homo'` power boost)
+and weighted SDR are not implemented. Within Milestone 6, weighted SCoRE
 (weighted MDR/SDR) is not implemented — deferred in favor of the shifted
-anytime controller, per AGENTS.md's backlog ordering (item 18 before
-item 19).
+anytime controller and the paper-exact coupled SDR construction, per
+AGENTS.md's backlog ordering. See `docs/roadmap.md` for the complete,
+maintained backlog.

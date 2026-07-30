@@ -1,0 +1,936 @@
+{
+  "provenance": {
+    "repository": "https://github.com/Tian-Bai/SCoRE",
+    "license": "MIT",
+    "license_copyright": "Copyright (c) 2026 Tian Bai and Ying Jin",
+    "commit_sha": "401b7caf6d030825ff67e8f08e44ba15ee8c94af",
+    "score_py_blob_sha": "aa9d111b92fcf574b77f232039410e8a4c23f3f5",
+    "package_version": "0.1.1",
+    "imported_score_py_path": "SCoRE/SCoRE.py",
+    "generator_seed": 20260729,
+    "generated_date": "2026-07-29",
+    "generator_script": "scripts/oracles/generate_score_sdr.py",
+    "notes": "coupled_evalues come from SCoRE_SDR (Equation 5.1). There is no independent (Equation 4.1) oracle column: SCoRE_MDR_bf only checks l in {0,1} and was found to diverge from the true infimum in a nontrivial fraction of randomized trials, so it is not used as an oracle -- see scripts/audits/compare_score_reference.py and docs/references.md for the measured numbers."
+  },
+  "cases": [
+    {
+      "calibration_losses": [
+        0.0
+      ],
+      "calibration_scores": [
+        0.0
+      ],
+      "test_scores": [
+        -1.0,
+        1.0
+      ],
+      "alpha": 0.5,
+      "gamma": 0.5,
+      "coupled_evalues": [
+        2.0,
+        2.0
+      ],
+      "selected_indices": [
+        0,
+        1
+      ],
+      "tau_hat": 2,
+      "name": "minimal_hand_computable",
+      "description": "n=1 zero-loss calibration, two distinct test points, traced by hand in tests/paper_score_sdr.rs."
+    },
+    {
+      "calibration_losses": [
+        0.5,
+        0.5,
+        0.1
+      ],
+      "calibration_scores": [
+        2.0,
+        2.0,
+        -1.0
+      ],
+      "test_scores": [
+        0.5,
+        2.0,
+        3.0
+      ],
+      "alpha": 0.5,
+      "gamma": 0.6,
+      "coupled_evalues": [
+        1.9047619047619047,
+        1.9047619047619047,
+        1.9047619047619047
+      ],
+      "selected_indices": [],
+      "tau_hat": null,
+      "name": "calibration_score_ties",
+      "description": "Two calibration points tied at the same score; their losses must land in the same pooled-score group."
+    },
+    {
+      "calibration_losses": [
+        0.2,
+        0.2
+      ],
+      "calibration_scores": [
+        -1.0,
+        1.0
+      ],
+      "test_scores": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "alpha": 0.5,
+      "gamma": 0.5,
+      "coupled_evalues": [
+        2.142857142857143,
+        2.142857142857143,
+        2.142857142857143
+      ],
+      "selected_indices": [
+        0,
+        1,
+        2
+      ],
+      "tau_hat": 3,
+      "name": "test_score_ties",
+      "description": "Three test points tied at the same score; each excludes only itself from the coupled denominator, not the whole tied group."
+    },
+    {
+      "calibration_losses": [
+        0.3,
+        0.6
+      ],
+      "calibration_scores": [
+        1.0,
+        -2.0
+      ],
+      "test_scores": [
+        1.0,
+        5.0
+      ],
+      "alpha": 0.6,
+      "gamma": 0.5,
+      "coupled_evalues": [
+        0.0,
+        0.0
+      ],
+      "selected_indices": [],
+      "tau_hat": null,
+      "name": "calibration_and_test_share_a_score",
+      "description": "A calibration point and a test point land in the same pooled score group."
+    },
+    {
+      "calibration_losses": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "calibration_scores": [
+        -1.0,
+        0.0,
+        1.0
+      ],
+      "test_scores": [
+        -0.5,
+        0.5,
+        2.0
+      ],
+      "alpha": 0.5,
+      "gamma": 0.3,
+      "coupled_evalues": [
+        4.0,
+        4.0,
+        4.0
+      ],
+      "selected_indices": [
+        0,
+        1,
+        2
+      ],
+      "tau_hat": 3,
+      "name": "all_losses_zero",
+      "description": "Calibration loss is 0 everywhere."
+    },
+    {
+      "calibration_losses": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "calibration_scores": [
+        -1.0,
+        0.0,
+        1.0
+      ],
+      "test_scores": [
+        -0.5,
+        0.5,
+        2.0
+      ],
+      "alpha": 0.9,
+      "gamma": 0.9,
+      "coupled_evalues": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "selected_indices": [],
+      "tau_hat": null,
+      "name": "all_losses_one",
+      "description": "Calibration loss is 1 (the loss upper bound) everywhere."
+    },
+    {
+      "calibration_losses": [
+        1.0,
+        0.0
+      ],
+      "calibration_scores": [
+        0.0,
+        1.0
+      ],
+      "test_scores": [],
+      "alpha": 0.5,
+      "gamma": 0.5,
+      "coupled_evalues": [],
+      "selected_indices": [],
+      "tau_hat": null,
+      "name": "empty_test_batch",
+      "description": "No test points at all; must not error and must select nothing."
+    },
+    {
+      "calibration_losses": [
+        1.0
+      ],
+      "calibration_scores": [
+        0.0
+      ],
+      "test_scores": [
+        0.0,
+        0.0
+      ],
+      "alpha": 0.5,
+      "gamma": 1e-06,
+      "coupled_evalues": [
+        0.0,
+        0.0
+      ],
+      "selected_indices": [],
+      "tau_hat": null,
+      "name": "zero_selections",
+      "description": "gamma too strict for any threshold to be feasible; every e-value is 0 and eBH selects nothing."
+    },
+    {
+      "calibration_losses": [
+        0.0,
+        0.0
+      ],
+      "calibration_scores": [
+        -1.0,
+        1.0
+      ],
+      "test_scores": [
+        -2.0,
+        -1.5,
+        0.0,
+        1.5,
+        2.0
+      ],
+      "alpha": 0.9,
+      "gamma": 0.9,
+      "coupled_evalues": [
+        3.0,
+        3.0,
+        3.0,
+        3.0,
+        3.0
+      ],
+      "selected_indices": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "tau_hat": 5,
+      "name": "all_selected",
+      "description": "Zero calibration loss and a generous gamma/alpha make every test point's e-value clear the eBH threshold."
+    },
+    {
+      "calibration_losses": [
+        0.118,
+        0.9619,
+        0.9086,
+        0.6997,
+        0.2659
+      ],
+      "calibration_scores": [
+        2.8151,
+        1.6725,
+        1.3013,
+        -0.3038,
+        -1.3666
+      ],
+      "test_scores": [
+        -2.4217,
+        2.4156
+      ],
+      "alpha": 0.519,
+      "gamma": 0.3417,
+      "coupled_evalues": [
+        5.853087503658179,
+        0.0
+      ],
+      "selected_indices": [
+        0
+      ],
+      "tau_hat": 1,
+      "name": "coupled_and_independent_disagree",
+      "description": "The coupled construction selects the low-scoring test point (its denominator only has to account for m=2 test points, one excluded as 'self'); the independent construction (checked separately in Rust, not via this script) does not."
+    },
+    {
+      "calibration_losses": [
+        0.41949122062969246,
+        0.13576492096080706,
+        0.7908485380464182,
+        0.3485536649842488,
+        0.8679106247874033,
+        0.3900627049200901
+      ],
+      "calibration_scores": [
+        2.0,
+        -2.0,
+        1.0,
+        1.0,
+        2.0,
+        -1.0
+      ],
+      "test_scores": [
+        -2.0
+      ],
+      "alpha": 0.2545452405637406,
+      "gamma": 0.44663812712429457,
+      "coupled_evalues": [
+        2.2389490266730205
+      ],
+      "selected_indices": [],
+      "tau_hat": null,
+      "name": "random_seed_20260729_index_0",
+      "description": "Randomized fixture #0 from numpy.random.default_rng(20260729); even indices use a small discrete score grid to keep ties common."
+    },
+    {
+      "calibration_losses": [
+        0.8442684626681984,
+        0.5332730430501933,
+        0.12035312740028514,
+        0.1232209979956107,
+        0.31589237336765164
+      ],
+      "calibration_scores": [
+        -0.14577016780148644,
+        -0.3747794252287626,
+        -1.3014210929927996,
+        1.6125107512801424,
+        2.5614521124235416
+      ],
+      "test_scores": [
+        -0.4716628849033533,
+        2.3985374094632244
+      ],
+      "alpha": 0.23222727615184455,
+      "gamma": 0.6617483040409824,
+      "coupled_evalues": [
+        2.042895351610846,
+        2.042895351610846
+      ],
+      "selected_indices": [],
+      "tau_hat": null,
+      "name": "random_seed_20260729_index_1",
+      "description": "Randomized fixture #1 from numpy.random.default_rng(20260729); even indices use a small discrete score grid to keep ties common."
+    },
+    {
+      "calibration_losses": [
+        0.43656259156528066,
+        0.8573775937538753,
+        0.5104161316063687,
+        0.7913688637092564
+      ],
+      "calibration_scores": [
+        0.0,
+        2.0,
+        1.0,
+        0.0
+      ],
+      "test_scores": [
+        1.0,
+        -2.0,
+        0.0,
+        0.0,
+        2.0,
+        1.0
+      ],
+      "alpha": 0.8438907081890037,
+      "gamma": 0.693332276832001,
+      "coupled_evalues": [
+        1.4423098900995006,
+        1.4423098900995006,
+        1.4423098900995006,
+        1.4423098900995006,
+        0.0,
+        1.4423098900995006
+      ],
+      "selected_indices": [
+        0,
+        1,
+        2,
+        3,
+        5
+      ],
+      "tau_hat": 5,
+      "name": "random_seed_20260729_index_2",
+      "description": "Randomized fixture #2 from numpy.random.default_rng(20260729); even indices use a small discrete score grid to keep ties common."
+    },
+    {
+      "calibration_losses": [
+        0.5459275117642669,
+        0.5353597646541812,
+        0.29404289783907533,
+        0.8128703188823987,
+        0.20867070387815745,
+        0.2125761971474739
+      ],
+      "calibration_scores": [
+        2.1878015494191505,
+        -2.0877374500893238,
+        -2.1423092463430233,
+        -2.3920085794313577,
+        1.9174190108042208,
+        1.0458780869080644
+      ],
+      "test_scores": [
+        -1.5914173100523434,
+        -2.3205876348865395,
+        1.8217878503759537
+      ],
+      "alpha": 0.5347929836791833,
+      "gamma": 0.1792970419123499,
+      "coupled_evalues": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "selected_indices": [],
+      "tau_hat": null,
+      "name": "random_seed_20260729_index_3",
+      "description": "Randomized fixture #3 from numpy.random.default_rng(20260729); even indices use a small discrete score grid to keep ties common."
+    },
+    {
+      "calibration_losses": [
+        0.7117608221919112
+      ],
+      "calibration_scores": [
+        -1.0
+      ],
+      "test_scores": [
+        2.0
+      ],
+      "alpha": 0.3965646150900425,
+      "gamma": 0.7974097441575227,
+      "coupled_evalues": [
+        0.0
+      ],
+      "selected_indices": [],
+      "tau_hat": null,
+      "name": "random_seed_20260729_index_4",
+      "description": "Randomized fixture #4 from numpy.random.default_rng(20260729); even indices use a small discrete score grid to keep ties common."
+    },
+    {
+      "calibration_losses": [
+        0.9723456616596812
+      ],
+      "calibration_scores": [
+        0.8763559056792121
+      ],
+      "test_scores": [
+        0.5363776375419975,
+        2.0761223264860797,
+        2.1404300244579546,
+        -2.7674617554935894,
+        -0.6675263444867319,
+        -1.9538080063172611
+      ],
+      "alpha": 0.8170367549373947,
+      "gamma": 0.16343556281223492,
+      "coupled_evalues": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "selected_indices": [],
+      "tau_hat": null,
+      "name": "random_seed_20260729_index_5",
+      "description": "Randomized fixture #5 from numpy.random.default_rng(20260729); even indices use a small discrete score grid to keep ties common."
+    },
+    {
+      "calibration_losses": [
+        0.06323265655763044,
+        0.6318565918694983,
+        0.9467026242846378,
+        0.7915377469248704,
+        0.25237183338002467,
+        0.7436827587296093
+      ],
+      "calibration_scores": [
+        2.0,
+        2.0,
+        1.0,
+        -1.0,
+        1.0,
+        2.0
+      ],
+      "test_scores": [
+        -1.0,
+        2.0,
+        0.0,
+        0.0,
+        -2.0,
+        1.0
+      ],
+      "alpha": 0.6257494305535185,
+      "gamma": 0.10180321102941059,
+      "coupled_evalues": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "selected_indices": [],
+      "tau_hat": null,
+      "name": "random_seed_20260729_index_6",
+      "description": "Randomized fixture #6 from numpy.random.default_rng(20260729); even indices use a small discrete score grid to keep ties common."
+    },
+    {
+      "calibration_losses": [
+        0.9793680765606008,
+        0.9279050791155423,
+        0.9812695509169505
+      ],
+      "calibration_scores": [
+        2.1205974205442084,
+        -0.08947495733677235,
+        -2.972537508807764
+      ],
+      "test_scores": [
+        -0.03264495804210421,
+        -0.2886400030420091,
+        -1.2173515255043383,
+        -0.721976745246447,
+        -0.2539055633496963,
+        -2.7329046346693344,
+        2.3475408859911546
+      ],
+      "alpha": 0.8657682023244208,
+      "gamma": 0.412696333869791,
+      "coupled_evalues": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "selected_indices": [],
+      "tau_hat": null,
+      "name": "random_seed_20260729_index_7",
+      "description": "Randomized fixture #7 from numpy.random.default_rng(20260729); even indices use a small discrete score grid to keep ties common."
+    },
+    {
+      "calibration_losses": [
+        0.009559418105394624
+      ],
+      "calibration_scores": [
+        -1.0
+      ],
+      "test_scores": [
+        2.0,
+        0.0,
+        -2.0,
+        2.0,
+        0.0,
+        -1.0,
+        0.0
+      ],
+      "alpha": 0.05416217422876621,
+      "gamma": 0.6246986980986432,
+      "coupled_evalues": [
+        1.9810621981550438,
+        1.9810621981550438,
+        1.9810621981550438,
+        1.9810621981550438,
+        1.9810621981550438,
+        1.9810621981550438,
+        1.9810621981550438
+      ],
+      "selected_indices": [],
+      "tau_hat": null,
+      "name": "random_seed_20260729_index_8",
+      "description": "Randomized fixture #8 from numpy.random.default_rng(20260729); even indices use a small discrete score grid to keep ties common."
+    },
+    {
+      "calibration_losses": [
+        0.9136003074797601,
+        0.9729035071475488
+      ],
+      "calibration_scores": [
+        1.5133261947733223,
+        -1.541534207811341
+      ],
+      "test_scores": [
+        -1.2000142994835017,
+        -2.4839672082420465,
+        -1.3287966706530854,
+        -0.1634124530595955,
+        2.239274283421878,
+        -0.8492365677183138,
+        -0.06149512109186439
+      ],
+      "alpha": 0.724447007606493,
+      "gamma": 0.6055414204865021,
+      "coupled_evalues": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "selected_indices": [],
+      "tau_hat": null,
+      "name": "random_seed_20260729_index_9",
+      "description": "Randomized fixture #9 from numpy.random.default_rng(20260729); even indices use a small discrete score grid to keep ties common."
+    },
+    {
+      "calibration_losses": [
+        0.5313277421127776,
+        0.14295952721729455
+      ],
+      "calibration_scores": [
+        0.0,
+        -2.0
+      ],
+      "test_scores": [
+        1.0,
+        0.0,
+        -2.0,
+        2.0,
+        1.0,
+        -2.0
+      ],
+      "alpha": 0.38673763330159155,
+      "gamma": 0.24563175858998607,
+      "coupled_evalues": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "selected_indices": [],
+      "tau_hat": null,
+      "name": "random_seed_20260729_index_10",
+      "description": "Randomized fixture #10 from numpy.random.default_rng(20260729); even indices use a small discrete score grid to keep ties common."
+    },
+    {
+      "calibration_losses": [
+        0.016569152626413675,
+        0.47942264928086353,
+        0.44996799776261387,
+        0.5901965002152666,
+        0.7553089828753904
+      ],
+      "calibration_scores": [
+        -0.01014764091264908,
+        2.24851922002908,
+        -1.6023847251626298,
+        -1.344994676073959,
+        2.70589746808614
+      ],
+      "test_scores": [
+        0.9910977461666808,
+        -0.27602918947575406,
+        -0.5781013152558285,
+        -2.8398807339638594
+      ],
+      "alpha": 0.7696313254081741,
+      "gamma": 0.2322339038497744,
+      "coupled_evalues": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "selected_indices": [],
+      "tau_hat": null,
+      "name": "random_seed_20260729_index_11",
+      "description": "Randomized fixture #11 from numpy.random.default_rng(20260729); even indices use a small discrete score grid to keep ties common."
+    },
+    {
+      "calibration_losses": [
+        0.7940178757175218,
+        0.9462906536358309
+      ],
+      "calibration_scores": [
+        -1.0,
+        2.0
+      ],
+      "test_scores": [
+        -2.0,
+        0.0,
+        -1.0
+      ],
+      "alpha": 0.83281780207957,
+      "gamma": 0.8781443344155269,
+      "coupled_evalues": [
+        1.1387649624427374,
+        1.1387649624427374,
+        1.1387649624427374
+      ],
+      "selected_indices": [],
+      "tau_hat": null,
+      "name": "random_seed_20260729_index_12",
+      "description": "Randomized fixture #12 from numpy.random.default_rng(20260729); even indices use a small discrete score grid to keep ties common."
+    },
+    {
+      "calibration_losses": [
+        0.5738692509358624
+      ],
+      "calibration_scores": [
+        -1.7143635958236143
+      ],
+      "test_scores": [
+        -1.97458177342312,
+        0.26097490406127344
+      ],
+      "alpha": 0.7022830241137076,
+      "gamma": 0.6889066711779472,
+      "coupled_evalues": [
+        0.0,
+        0.0
+      ],
+      "selected_indices": [],
+      "tau_hat": null,
+      "name": "random_seed_20260729_index_13",
+      "description": "Randomized fixture #13 from numpy.random.default_rng(20260729); even indices use a small discrete score grid to keep ties common."
+    },
+    {
+      "calibration_losses": [
+        0.6444785472875841,
+        0.9908638368518471,
+        0.9499191555995918,
+        0.27868838890186987
+      ],
+      "calibration_scores": [
+        -1.0,
+        1.0,
+        -2.0,
+        2.0
+      ],
+      "test_scores": [
+        0.0,
+        1.0,
+        0.0,
+        2.0,
+        -2.0,
+        -1.0
+      ],
+      "alpha": 0.2815806166727762,
+      "gamma": 0.693533502053607,
+      "coupled_evalues": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "selected_indices": [],
+      "tau_hat": null,
+      "name": "random_seed_20260729_index_14",
+      "description": "Randomized fixture #14 from numpy.random.default_rng(20260729); even indices use a small discrete score grid to keep ties common."
+    },
+    {
+      "calibration_losses": [
+        0.5235170296364591,
+        0.5758799259461349,
+        0.16148397916431,
+        0.016642034002954387
+      ],
+      "calibration_scores": [
+        1.3351863820447867,
+        -2.1194209508348467,
+        1.4353228923127286,
+        1.4323569621216377
+      ],
+      "test_scores": [
+        0.5941069522488611,
+        0.4587156497648788,
+        1.1318327401764938,
+        -1.0192723843444547,
+        2.6595175885900204,
+        1.2636819891174953
+      ],
+      "alpha": 0.7211925954298863,
+      "gamma": 0.29995448797454916,
+      "coupled_evalues": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "selected_indices": [],
+      "tau_hat": null,
+      "name": "random_seed_20260729_index_15",
+      "description": "Randomized fixture #15 from numpy.random.default_rng(20260729); even indices use a small discrete score grid to keep ties common."
+    },
+    {
+      "calibration_losses": [
+        0.11704534353159779,
+        0.34242870491784094,
+        0.00929655074797986,
+        0.41127472026658707,
+        0.5035064531339825,
+        0.2544231218851797
+      ],
+      "calibration_scores": [
+        -2.0,
+        2.0,
+        1.0,
+        -2.0,
+        1.0,
+        -2.0
+      ],
+      "test_scores": [
+        2.0
+      ],
+      "alpha": 0.6625037275407966,
+      "gamma": 0.2488347940540959,
+      "coupled_evalues": [
+        0.0
+      ],
+      "selected_indices": [],
+      "tau_hat": null,
+      "name": "random_seed_20260729_index_16",
+      "description": "Randomized fixture #16 from numpy.random.default_rng(20260729); even indices use a small discrete score grid to keep ties common."
+    },
+    {
+      "calibration_losses": [
+        0.4864691930665227,
+        0.6426027424128731,
+        0.8391681110882542,
+        0.42638200959421446,
+        0.1069638812204251
+      ],
+      "calibration_scores": [
+        -0.5997661556445877,
+        0.16366149130488328,
+        -2.9645351219095506,
+        0.22426082734782327,
+        -2.9401350701251245
+      ],
+      "test_scores": [
+        -2.834168795034937,
+        0.5372642654938187
+      ],
+      "alpha": 0.3553806980558691,
+      "gamma": 0.860352368958554,
+      "coupled_evalues": [
+        1.713509280450638,
+        1.713509280450638
+      ],
+      "selected_indices": [],
+      "tau_hat": null,
+      "name": "random_seed_20260729_index_17",
+      "description": "Randomized fixture #17 from numpy.random.default_rng(20260729); even indices use a small discrete score grid to keep ties common."
+    },
+    {
+      "calibration_losses": [
+        0.8487212660467799,
+        0.974046286753478,
+        0.44236438233782505,
+        0.690828224725708,
+        0.6855683728179344,
+        0.6968581741207486,
+        0.09973626607409336
+      ],
+      "calibration_scores": [
+        -1.0,
+        1.0,
+        1.0,
+        -2.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "test_scores": [
+        0.0,
+        2.0,
+        -2.0,
+        -2.0,
+        2.0
+      ],
+      "alpha": 0.31473528900058056,
+      "gamma": 0.08120874679941342,
+      "coupled_evalues": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "selected_indices": [],
+      "tau_hat": null,
+      "name": "random_seed_20260729_index_18",
+      "description": "Randomized fixture #18 from numpy.random.default_rng(20260729); even indices use a small discrete score grid to keep ties common."
+    },
+    {
+      "calibration_losses": [
+        0.2540281712342395
+      ],
+      "calibration_scores": [
+        0.5527064090246254
+      ],
+      "test_scores": [
+        -1.9317752120851777,
+        -0.5005109310312703,
+        0.7417952380712549,
+        -1.2007531476020816,
+        -2.199874784133931,
+        1.7222849250421768
+      ],
+      "alpha": 0.2649579445146743,
+      "gamma": 0.22216901254258417,
+      "coupled_evalues": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "selected_indices": [],
+      "tau_hat": null,
+      "name": "random_seed_20260729_index_19",
+      "description": "Randomized fixture #19 from numpy.random.default_rng(20260729); even indices use a small discrete score grid to keep ties common."
+    }
+  ]
+}

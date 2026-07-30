@@ -9,9 +9,12 @@ and anytime-valid conformal risk guarantees.
 
 **Milestone 0 (vocabulary), Milestone 1 (classical monotone CRC),
 Milestone 2 (anytime-valid monotone CRC), Milestone 3 (non-monotonic CRC,
-partial), Milestone 4 (SCoRE-MDR, partial), Milestone 5 (SCoRE-SDR,
-partial), and Milestone 6 (distribution shift, partial) are done.**
-Milestone 7 (downstream examples) is not implemented yet.
+partial), Milestone 4 (SCoRE-MDR, partial), Milestone 5 (SCoRE-SDR), and
+Milestone 6 (distribution shift, partial) are done.** Milestone 5 does not
+yet include the paper's optional randomized-pruning boost (`prune='hete'`
+/ `'homo'` in the official implementation) or weighted SDR; see the
+Milestone 5 paragraph below and `docs/roadmap.md`. Milestone 7 (downstream
+examples) is not implemented yet.
 
 Milestone 0 provides:
 
@@ -44,7 +47,7 @@ parameter their own algorithm already produced, plus a symmetry
 declaration and stability evidence, and the function checks Theorem 1's
 hypothesis and certifies it. Only Theorem 1 is implemented; the paper's
 concrete stability instances (discretized losses, Lipschitz losses,
-selective classification, regularized ERM) are tracked in `tasks/todo.md`.
+selective classification, regularized ERM) are tracked in `docs/roadmap.md`.
 
 Milestone 4 adds `risksieve::selective::evalue::risk_adjusted_evalue` and
 `risksieve::selective::mdr::certify`, the SCoRE-MDR direct deployment
@@ -55,19 +58,29 @@ deploy/abstain decision from a risk-adjusted e-value; the resulting
 property of any one realized decision.
 
 Milestone 5 adds `risksieve::selective::sdr::certify`, batch SCoRE-SDR
-(Bai and Jin (2026), Algorithm 2, Theorem 3.3), built from a generic eBH
-selection engine (`risksieve::selective::ebh::select`) composed with
-Milestone 4's per-test-point e-value construction, applied independently
-to each item in the batch rather than the paper's own cross-test-point
-construction (Equation 5.1) — deferred because its efficient-computation
-algorithm wasn't extractable with confidence and its normalizing
-function's monotonicity in the threshold isn't obvious; see
-`tasks/todo.md`. This remains statistically valid, just presumably less
-powerful than the paper's own construction. An empty selected set is a
-valid certificate, not an error; `risksieve::selective::sdr::realized_selective_risk`
-computes the post-hoc realized risk once labels arrive, returning a plain
-number rather than a certificate so it can't be mistaken for the
-guarantee itself.
+(Bai and Jin (2026), Algorithm 2, Theorem 3.3) using the paper's own
+cross-test-point-coupled e-value (Equation 5.1, Theorem 5.1, via the new
+`risksieve::selective::coupled` module), built from a generic eBH
+selection engine (`risksieve::selective::ebh::select`). The earlier
+composition — Milestone 4's e-value construction applied independently to
+each batch item, ignoring every other test point — remains available as
+`risksieve::selective::sdr::certify_independent`: still a fully valid
+instantiation of Theorem 3.3 (whose hypothesis only requires each e-value
+to individually satisfy Definition 3.1), kept for comparison and backward
+compatibility. The two constructions do not always select the same set —
+`docs/references.md` records a fixture where they differ and one where
+they coincide by symmetry — and neither the paper nor this crate proves
+one dominates the other in general. The coupled construction is
+cross-checked against `Tian-Bai/SCoRE`'s own `SCoRE_SDR` (30 fixture
+cases, `tests/score_sdr_oracle.rs`) and against a Monte Carlo simulation
+of the SDR guarantee itself (`tests/statistical_validity.rs`, opening this
+crate's tier 4). An empty selected set is a valid certificate, not an
+error; `risksieve::selective::sdr::realized_selective_risk` computes the
+post-hoc realized risk once labels arrive, returning a plain number rather
+than a certificate so it can't be mistaken for the guarantee itself.
+Randomized pruning (an optional power boost in the official
+implementation) and weighted SDR remain unimplemented; see
+`docs/roadmap.md`.
 
 Milestone 6 adds `risksieve::anytime::AnytimeShiftedController`,
 importance-weighted anytime-valid CRC under covariate shift (Hultberg,
@@ -82,7 +95,7 @@ condition holds. `weight_source` is a required, never-defaulted field —
 `KnownDensityRatio` gives the full finite-sample guarantee, `Estimated`
 downgrades to an asymptotic one, since the paper does not establish
 finite-sample validity for estimated weights. Weighted SCoRE is deferred;
-see `tasks/todo.md`.
+see `docs/roadmap.md`.
 
 See `AGENTS.md` section 7 for the full implementation sequence and
 `docs/validation.md` for what is and is not tested yet.

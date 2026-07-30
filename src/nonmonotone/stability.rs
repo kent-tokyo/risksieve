@@ -33,7 +33,7 @@
 //! stability instances (discretized bounded losses, continuous Lipschitz
 //! losses, selective classification, regularized ERM) each derive their
 //! own `beta` from a specific construction and are not implemented yet;
-//! see `tasks/todo.md`. In particular, the discretized-loss construction
+//! see `docs/roadmap.md`. In particular, the discretized-loss construction
 //! (the paper's Proposition 2) turned out to carry an asymptotic
 //! Lambert-W-function bound rather than a clean finite-sample `beta`,
 //! and was deferred rather than transcribed with unverified confidence.
