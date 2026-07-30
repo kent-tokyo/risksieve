@@ -70,26 +70,48 @@
 //!   is exactly known (Assumption 6.1's `w(.)`), so Theorem 6.2 applies
 //!   and the certificate is [`GuaranteeKind::MarginalDeploymentRisk`],
 //!   the same finite-sample guarantee kind [`certify`] returns.
-//! - [`ImportanceWeightSource::Estimated`]: the weight was estimated by a
-//!   model trained independent of the calibration data used here (the
-//!   caller declares this via `training_data_separate_from_calibration`,
-//!   exactly the hypothesis Theorem 6.4 requires). Theorem 6.4's
-//!   conclusion is `limsup_{n->infinity} MDR_n <= alpha` -- a limiting
-//!   statement, not a finite-sample one -- so the certificate is
-//!   [`GuaranteeKind::Asymptotic`] instead, the same downgrade pattern
-//!   [`crate::anytime::shifted::AnytimeShiftedController`] applies for
-//!   Theorem 4.7's estimated-weight case. Declaring `KnownDensityRatio`
-//!   is the caller's assertion, not something this crate verifies from
-//!   data (AGENTS.md section 4: caller-declared assumptions are recorded
-//!   as such, never silently upgraded to "library-checked").
+//! - [`ImportanceWeightSource::Estimated`]: **only** yields
+//!   [`GuaranteeKind::Asymptotic`] when *every one* of Theorem 6.4's four
+//!   hypotheses is declared true: `training_data_separate_from_calibration`,
+//!   `consistency` (`L2(P_X)`-consistency of the estimator sequence) and
+//!   `threshold_regularity` (continuity and strict monotonicity of the
+//!   paper's `F` at `t*`) both `Asserted`, *and* the caller passed
+//!   `gamma == alpha` exactly (Theorem 6.4 is stated only for that choice
+//!   -- checked as exact `f64` equality, not an approximate comparison,
+//!   so a caller who did not deliberately pass the same value twice does
+//!   not get credited with meeting this hypothesis). Any one of these
+//!   missing downgrades the certificate to [`GuaranteeKind::EmpiricalOnly`]
+//!   rather than erroring: `certify_weighted` still returns a real
+//!   deploy/abstain decision from the same e-value computation, just
+//!   without a theorem attached to it -- the same choice
+//!   `nonmonotone::stability::certify` makes for `StabilityEvidence::Estimated`
+//!   without the full analytic hypothesis. Declaring `KnownDensityRatio`,
+//!   and every field of `Estimated`, is the caller's assertion, not
+//!   something this crate verifies from data (AGENTS.md section 4:
+//!   caller-declared assumptions are recorded as such, never silently
+//!   upgraded to "library-checked").
+//!
+//! [`crate::anytime::shifted::AnytimeShiftedController`] uses the same
+//! [`ImportanceWeightSource`] type but downgrades *every* `Estimated`
+//! case to [`GuaranteeKind::EmpiricalOnly`] unconditionally, regardless of
+//! these fields: Hultberg, Zachariah, and Ribeiro (2026), Theorem 4.7
+//! never discusses estimated weights at all (it takes the importance
+//! weight `omega` as known, a standing hypothesis of the theorem itself,
+//! not something it relaxes) -- so there is no asymptotic argument for
+//! that controller to condition on in the first place. This module's
+//! `Estimated` downgrade path exists *because* Theorem 6.4 is a real,
+//! separate theorem with its own stated hypotheses; it is not a general
+//! license to call any estimated-weight case `Asymptotic`.
 //!
 //! Weights carry no normalization requirement and are invariant to a
 //! *uniform* positive rescaling of every weight together (calibration
 //! *and* the test point) -- see `super::evalue_weighted`'s module docs.
 //! `certify_weighted`'s `Assumptions::exchangeability` is
-//! `ExchangeabilityAssumption::Iid` (Assumption 6.1 states i.i.d. within
-//! each of the calibration and test distributions, not mere
-//! exchangeability), matching how
+//! `ExchangeabilityAssumption::CovariateShiftIid` (Assumption 6.1 states
+//! i.i.d. draws *within* each of the calibration and test distributions,
+//! which differ from each other -- a different claim from
+//! `ExchangeabilityAssumption::Iid`, which asserts calibration and test
+//! are drawn from the *same* distribution), matching how
 //! [`crate::anytime::shifted::AnytimeShiftedController`] records the
 //! analogous assumption for Theorem 4.7.
 //!
@@ -104,6 +126,7 @@ use crate::error::RiskSieveError;
 use crate::guarantee::{
     Assumptions, ExchangeabilityAssumption, GuaranteeKind, ImportanceWeightSource,
     MonotonicityAssumption, ShiftAssumption, StabilityEvidence, SymmetryAssumption,
+    ThresholdRegularityEvidence, WeightConsistencyEvidence,
 };
 use crate::probability::{ClosedInterval, ClosedUnitInterval, NonNegative, OpenUnitInterval};
 use crate::selective::evalue::risk_adjusted_evalue;
@@ -247,11 +270,29 @@ pub fn certify_weighted(
 
     let guarantee = match &weight_source {
         ImportanceWeightSource::KnownDensityRatio => GuaranteeKind::MarginalDeploymentRisk,
-        ImportanceWeightSource::Estimated { .. } => GuaranteeKind::Asymptotic,
+        ImportanceWeightSource::Estimated {
+            training_data_separate_from_calibration,
+            consistency,
+            threshold_regularity,
+            ..
+        } => {
+            let meets_theorem_6_4 = *training_data_separate_from_calibration
+                && matches!(consistency, WeightConsistencyEvidence::Asserted { .. })
+                && matches!(
+                    threshold_regularity,
+                    ThresholdRegularityEvidence::Asserted { .. }
+                )
+                && gamma.get() == alpha.get();
+            if meets_theorem_6_4 {
+                GuaranteeKind::Asymptotic
+            } else {
+                GuaranteeKind::EmpiricalOnly
+            }
+        }
     };
 
     let assumptions = Assumptions {
-        exchangeability: ExchangeabilityAssumption::Iid,
+        exchangeability: ExchangeabilityAssumption::CovariateShiftIid,
         bounded_loss: ClosedInterval::new(0.0, 1.0)?,
         monotonicity: MonotonicityAssumption::NonMonotone,
         right_continuity: false,
@@ -518,12 +559,51 @@ mod tests {
         );
     }
 
+    /// A `weight_source` declaring every one of Theorem 6.4's hypotheses
+    /// except `gamma == alpha`, which the caller must separately ensure by
+    /// passing the same value for both parameters.
+    fn fully_justified_estimated_weight_source() -> ImportanceWeightSource {
+        ImportanceWeightSource::Estimated {
+            method: "test fixture".to_string(),
+            training_data_separate_from_calibration: true,
+            consistency: WeightConsistencyEvidence::Asserted {
+                justification: "test fixture".to_string(),
+            },
+            threshold_regularity: ThresholdRegularityEvidence::Asserted {
+                justification: "test fixture".to_string(),
+            },
+        }
+    }
+
     #[test]
-    fn estimated_weight_source_downgrades_to_asymptotic() {
+    fn estimated_weight_with_full_theorem_6_4_conditions_reaches_asymptotic() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+        let certificate = certify_weighted(
+            &losses(&[0.0]),
+            &[1.0],
+            &weights(&[1.0]),
+            0.0,
+            weight(1.0),
+            alpha,
+            alpha,
+            fully_justified_estimated_weight_source(),
+        )
+        .unwrap();
+        assert_eq!(certificate.guarantee, GuaranteeKind::Asymptotic);
+    }
+
+    #[test]
+    fn estimated_weight_without_independent_training_data_does_not_reach_asymptotic() {
         let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
         let weight_source = ImportanceWeightSource::Estimated {
             method: "test fixture".to_string(),
-            training_data_separate_from_calibration: true,
+            training_data_separate_from_calibration: false,
+            consistency: WeightConsistencyEvidence::Asserted {
+                justification: "test fixture".to_string(),
+            },
+            threshold_regularity: ThresholdRegularityEvidence::Asserted {
+                justification: "test fixture".to_string(),
+            },
         };
         let certificate = certify_weighted(
             &losses(&[0.0]),
@@ -536,7 +616,75 @@ mod tests {
             weight_source,
         )
         .unwrap();
-        assert_eq!(certificate.guarantee, GuaranteeKind::Asymptotic);
+        assert_eq!(certificate.guarantee, GuaranteeKind::EmpiricalOnly);
+    }
+
+    #[test]
+    fn estimated_weight_without_consistency_evidence_does_not_reach_asymptotic() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+        let weight_source = ImportanceWeightSource::Estimated {
+            method: "test fixture".to_string(),
+            training_data_separate_from_calibration: true,
+            consistency: WeightConsistencyEvidence::Unknown,
+            threshold_regularity: ThresholdRegularityEvidence::Asserted {
+                justification: "test fixture".to_string(),
+            },
+        };
+        let certificate = certify_weighted(
+            &losses(&[0.0]),
+            &[1.0],
+            &weights(&[1.0]),
+            0.0,
+            weight(1.0),
+            alpha,
+            alpha,
+            weight_source,
+        )
+        .unwrap();
+        assert_eq!(certificate.guarantee, GuaranteeKind::EmpiricalOnly);
+    }
+
+    #[test]
+    fn estimated_weight_without_threshold_regularity_evidence_does_not_reach_asymptotic() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+        let weight_source = ImportanceWeightSource::Estimated {
+            method: "test fixture".to_string(),
+            training_data_separate_from_calibration: true,
+            consistency: WeightConsistencyEvidence::Asserted {
+                justification: "test fixture".to_string(),
+            },
+            threshold_regularity: ThresholdRegularityEvidence::Unknown,
+        };
+        let certificate = certify_weighted(
+            &losses(&[0.0]),
+            &[1.0],
+            &weights(&[1.0]),
+            0.0,
+            weight(1.0),
+            alpha,
+            alpha,
+            weight_source,
+        )
+        .unwrap();
+        assert_eq!(certificate.guarantee, GuaranteeKind::EmpiricalOnly);
+    }
+
+    #[test]
+    fn estimated_weight_with_gamma_not_equal_alpha_does_not_reach_asymptotic() {
+        let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
+        let gamma = OpenUnitInterval::new("gamma", 0.4).unwrap();
+        let certificate = certify_weighted(
+            &losses(&[0.0]),
+            &[1.0],
+            &weights(&[1.0]),
+            0.0,
+            weight(1.0),
+            alpha,
+            gamma,
+            fully_justified_estimated_weight_source(),
+        )
+        .unwrap();
+        assert_eq!(certificate.guarantee, GuaranteeKind::EmpiricalOnly);
     }
 
     #[test]
@@ -559,7 +707,7 @@ mod tests {
     }
 
     #[test]
-    fn weighted_exchangeability_is_iid_not_merely_exchangeable() {
+    fn weighted_exchangeability_is_covariate_shift_iid_not_plain_iid() {
         let alpha = OpenUnitInterval::new("alpha", 0.5).unwrap();
         let certificate = certify_weighted(
             &losses(&[0.0]),
@@ -573,6 +721,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
+            certificate.assumptions.exchangeability,
+            ExchangeabilityAssumption::CovariateShiftIid
+        );
+        assert_ne!(
             certificate.assumptions.exchangeability,
             ExchangeabilityAssumption::Iid
         );

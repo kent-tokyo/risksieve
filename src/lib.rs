@@ -138,7 +138,7 @@ pub use error::RiskSieveError;
 pub use guarantee::{
     Assumptions, ExchangeabilityAssumption, GuaranteeKind, ImportanceWeightSource,
     MonotonicityAssumption, ShiftAssumption, StabilityEstimationMethod, StabilityEvidence,
-    SymmetryAssumption,
+    SymmetryAssumption, ThresholdRegularityEvidence, WeightConsistencyEvidence,
 };
 pub use loss::{AbsoluteErrorLoss, BoundedLoss, ZeroOneLoss};
 pub use probability::{ClosedInterval, ClosedUnitInterval, NonNegative, OpenUnitInterval};

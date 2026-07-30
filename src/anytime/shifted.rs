@@ -50,17 +50,25 @@
 //! ## Known versus estimated weights
 //!
 //! Theorem 4.7 assumes `omega` is *known* (the paper states this as a
-//! standing assumption, not something the theorem itself relaxes).
+//! standing assumption, not something the theorem itself relaxes) --
+//! unlike Bai and Jin (2026), whose Theorem 6.4 gives covariate-shift
+//! MDR control a real, if narrow, asymptotic argument for *estimated*
+//! weights (see `selective::mdr`'s module docs). Hultberg, Zachariah,
+//! and Ribeiro (2026) simply never address the estimated-weight case:
+//! there is no analogous robustness result to fall back on here.
 //! [`AnytimeShiftedControllerBuilder::weight_source`] requires the caller
 //! to say which: [`ImportanceWeightSource::KnownDensityRatio`] yields
 //! [`GuaranteeKind::AnytimeHighProbability`], the full theorem-backed
-//! claim. [`ImportanceWeightSource::Estimated`] yields
-//! [`GuaranteeKind::Asymptotic`] instead — the paper does not establish a
-//! finite-sample guarantee for estimated weights, so this crate does not
-//! either (the same downgrade pattern [`crate::nonmonotone::stability`]
-//! applies to `StabilityEvidence::Estimated`). This crate does not learn
-//! `omega` from data itself (AGENTS.md section 3: no automatic
-//! density-ratio estimation in the core crate); see [`crate::shift::importance`].
+//! claim. [`ImportanceWeightSource::Estimated`] always yields
+//! [`GuaranteeKind::EmpiricalOnly`] instead, regardless of what its
+//! `consistency` or `threshold_regularity` fields declare -- those exist
+//! to support `selective::mdr::certify_weighted`'s own Theorem 6.4
+//! hypothesis check, and this controller has no theorem for them to
+//! back here (the same "no theorem, no guarantee" reasoning
+//! [`crate::nonmonotone::stability`] applies to a fully unsupported
+//! `StabilityEvidence`). This crate does not learn `omega` from data
+//! itself (AGENTS.md section 3: no automatic density-ratio estimation in
+//! the core crate); see [`crate::shift::importance`].
 //!
 //! ## The running minimum still applies, for the same reason
 //!
@@ -429,7 +437,12 @@ impl<L, Parameter: Clone + PartialOrd> AnytimeShiftedController<L, Parameter> {
 
         let guarantee = match &self.weight_source {
             ImportanceWeightSource::KnownDensityRatio => GuaranteeKind::AnytimeHighProbability,
-            ImportanceWeightSource::Estimated { .. } => GuaranteeKind::Asymptotic,
+            // Unconditional, unlike `selective::mdr::certify_weighted`'s
+            // Theorem-6.4-gated downgrade: Theorem 4.7 has no asymptotic
+            // argument for estimated weights at all, so no combination of
+            // `Estimated`'s fields could ever earn `Asymptotic` here (see
+            // the module docs).
+            ImportanceWeightSource::Estimated { .. } => GuaranteeKind::EmpiricalOnly,
         };
 
         let diagnostics = Diagnostics {
@@ -444,7 +457,7 @@ impl<L, Parameter: Clone + PartialOrd> AnytimeShiftedController<L, Parameter> {
             ..Default::default()
         };
         let assumptions = Assumptions {
-            exchangeability: ExchangeabilityAssumption::Iid,
+            exchangeability: ExchangeabilityAssumption::CovariateShiftIid,
             bounded_loss: bounds,
             monotonicity: MonotonicityAssumption::Monotone {
                 non_increasing: true,
@@ -472,6 +485,7 @@ impl<L, Parameter: Clone + PartialOrd> AnytimeShiftedController<L, Parameter> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::guarantee::{ThresholdRegularityEvidence, WeightConsistencyEvidence};
     use crate::probability::ClosedInterval;
 
     #[derive(Debug)]
@@ -539,8 +553,13 @@ mod tests {
         assert!(matches!(err, RiskSieveError::DegenerateWeights));
     }
 
+    /// Unlike `selective::mdr::certify_weighted`, every `Estimated` case
+    /// here downgrades to `EmpiricalOnly` unconditionally -- even one
+    /// declaring every field Theorem 6.4 would ask for -- since Theorem
+    /// 4.7 has no asymptotic argument for estimated weights at all (see
+    /// the module docs).
     #[test]
-    fn estimated_weight_source_downgrades_to_asymptotic() {
+    fn estimated_weight_source_downgrades_to_empirical_only() {
         let mut controller = AnytimeShiftedController::builder()
             .target_risk(0.9)
             .unwrap()
@@ -553,11 +572,31 @@ mod tests {
             .weight_source(ImportanceWeightSource::Estimated {
                 method: "test fixture".to_string(),
                 training_data_separate_from_calibration: true,
+                consistency: WeightConsistencyEvidence::Asserted {
+                    justification: "test fixture".to_string(),
+                },
+                threshold_regularity: ThresholdRegularityEvidence::Asserted {
+                    justification: "test fixture".to_string(),
+                },
             })
             .build()
             .unwrap();
         let certificate = controller.update(&0.05, 1.0).unwrap();
-        assert_eq!(certificate.guarantee, GuaranteeKind::Asymptotic);
+        assert_eq!(certificate.guarantee, GuaranteeKind::EmpiricalOnly);
+    }
+
+    #[test]
+    fn exchangeability_is_covariate_shift_iid_not_plain_iid() {
+        let mut controller = small_controller();
+        let certificate = controller.update(&0.05, 1.0).unwrap();
+        assert_eq!(
+            certificate.assumptions.exchangeability,
+            ExchangeabilityAssumption::CovariateShiftIid
+        );
+        assert_ne!(
+            certificate.assumptions.exchangeability,
+            ExchangeabilityAssumption::Iid
+        );
     }
 
     #[test]
