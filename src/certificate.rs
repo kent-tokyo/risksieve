@@ -7,6 +7,53 @@
 //! return value.
 
 use crate::guarantee::{Assumptions, GuaranteeKind};
+use crate::probability::{NonNegative, OpenUnitInterval};
+
+/// A risk-adjusted e-value, which can be mathematically `+infinity`, not
+/// merely large, for the weighted construction
+/// (`selective::evalue_weighted::weighted_risk_adjusted_evalue`, Bai and
+/// Jin 2026, Equation 6.1) -- see that function's docs for the narrow,
+/// non-degenerate condition under which this occurs. The unweighted
+/// construction (`selective::evalue::risk_adjusted_evalue`, Equation 4.1)
+/// is provably always finite, and always constructs `EValue::Finite`.
+///
+/// Defined here (Milestone 0's foundational vocabulary layer), not in
+/// `selective::evalue_weighted`, so that [`Diagnostics::risk_adjusted_evalue`]
+/// can use it without a dependency from `certificate` (used by every
+/// controller) onto a Milestone-6-specific module.
+/// `selective::evalue_weighted` re-exports this type at its own path for
+/// backward compatibility.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum EValue {
+    /// A finite, non-negative e-value.
+    Finite(NonNegative),
+    /// The e-value's true value is mathematically unbounded.
+    PositiveInfinity,
+}
+
+impl EValue {
+    /// Whether thresholding this e-value at `1/alpha` deploys: always
+    /// `true` for [`EValue::PositiveInfinity`] (for any `alpha < 1`),
+    /// otherwise the ordinary finite comparison.
+    pub fn clears_deployment_threshold(&self, alpha: OpenUnitInterval) -> bool {
+        match self {
+            EValue::Finite(value) => value.get() >= 1.0 / alpha.get(),
+            EValue::PositiveInfinity => true,
+        }
+    }
+
+    /// A plain `f64` view, with [`EValue::PositiveInfinity`] represented
+    /// as `f64::INFINITY`. Not a [`NonNegative`]: that type rejects
+    /// infinite values by construction, which is exactly the distinction
+    /// this type exists to preserve.
+    pub fn as_f64(&self) -> f64 {
+        match self {
+            EValue::Finite(value) => value.get(),
+            EValue::PositiveInfinity => f64::INFINITY,
+        }
+    }
+}
 
 /// Auxiliary information about how a certificate was produced.
 ///
@@ -48,21 +95,17 @@ pub struct Diagnostics {
     /// is an input assumption, not a computed statistic (AGENTS.md
     /// section 16: "assumptions are represented in returned metadata").
     pub asserted_reference_bound: Option<f64>,
-    /// The risk-adjusted e-value `selective::mdr::certify` computed
-    /// (Bai and Jin 2026, Equation 4.1) before thresholding it into a
-    /// deployment decision. Recorded so the magnitude behind the
-    /// boolean decision stays auditable, not just the decision itself.
-    ///
-    /// `selective::mdr::certify_weighted`'s weighted construction
-    /// (`selective::evalue_weighted::EValue`) can genuinely be
-    /// `f64::INFINITY` in a narrow, non-degenerate case (see that module's
-    /// docs). This plain `f64` field carries that value faithfully in
-    /// memory, but under the `serde` feature, `serde_json` serializes
-    /// `Some(f64::INFINITY)` as `null`, which deserializes back as `None`
-    /// -- indistinguishable from "not computed". This does not affect the
-    /// certified `parameter` (the actual deploy decision), only this
-    /// auxiliary diagnostic; see `certificate_serde_round_trip_does_not_preserve_positive_infinity`.
-    pub risk_adjusted_evalue: Option<f64>,
+    /// The risk-adjusted e-value `selective::mdr::certify` (or
+    /// `certify_weighted`) computed (Bai and Jin 2026, Equation 4.1 or
+    /// 6.1) before thresholding it into a deployment decision. Recorded
+    /// so the magnitude behind the boolean decision stays auditable, not
+    /// just the decision itself. `EValue::Finite` vs
+    /// `EValue::PositiveInfinity` round-trips distinctly from `None`
+    /// under the `serde` feature (see `certificate_serde_round_trip_preserves_positive_infinity`),
+    /// unlike a plain `Option<f64>` would (`serde_json` serializes
+    /// `Some(f64::INFINITY)` as `null`, indistinguishable from "not
+    /// computed" on the way back).
+    pub risk_adjusted_evalue: Option<EValue>,
     /// The calibration-threshold parameter `gamma` (Bai and Jin 2026,
     /// Equation 4.1) actually used to compute `risk_adjusted_evalue`.
     /// Distinct from `target_risk` (`alpha`): recorded because Remark 4.5
@@ -164,14 +207,16 @@ mod tests {
         assert_eq!(restored, certificate);
     }
 
-    /// Documents a known, narrow limitation (see `risk_adjusted_evalue`'s
-    /// doc comment): a `+infinity` weighted e-value round-trips through
-    /// `serde_json` as `None`, not `Some(f64::INFINITY)`. Only the
-    /// diagnostic is affected -- the certified `parameter` is untouched.
+    /// `EValue` fixes the `Option<f64>` limitation the previous version of
+    /// this field had (see `risk_adjusted_evalue`'s doc comment): `Finite`,
+    /// `PositiveInfinity`, and `None` (not computed) all round-trip
+    /// through `serde_json` distinctly, and the JSON produced is ordinary
+    /// tagged-enum JSON -- no reliance on a non-standard bare `Infinity`
+    /// token the way encoding a raw `f64::INFINITY` would need.
     #[cfg(feature = "serde")]
     #[test]
-    fn certificate_serde_round_trip_does_not_preserve_positive_infinity() {
-        let certificate = RiskCertificate {
+    fn certificate_serde_round_trip_preserves_positive_infinity() {
+        let finite = RiskCertificate {
             parameter: true,
             target_risk: 0.1,
             certified_upper_bound: 0.1,
@@ -179,13 +224,49 @@ mod tests {
             assumptions: sample_assumptions(),
             calibration_size: 1,
             diagnostics: Diagnostics {
-                risk_adjusted_evalue: Some(f64::INFINITY),
+                risk_adjusted_evalue: Some(EValue::Finite(NonNegative::new("e", 2.0).unwrap())),
                 ..Default::default()
             },
         };
-        let json = serde_json::to_string(&certificate).unwrap();
-        let restored: RiskCertificate<bool> = serde_json::from_str(&json).unwrap();
-        assert_eq!(restored.diagnostics.risk_adjusted_evalue, None);
-        assert_eq!(restored.parameter, certificate.parameter);
+        let finite_json = serde_json::to_string(&finite).unwrap();
+        assert!(
+            !finite_json.contains("Infinity"),
+            "finite case must not contain the token \"Infinity\": {finite_json}"
+        );
+        let finite_restored: RiskCertificate<bool> = serde_json::from_str(&finite_json).unwrap();
+        assert_eq!(finite_restored, finite);
+
+        let infinite = Diagnostics {
+            risk_adjusted_evalue: Some(EValue::PositiveInfinity),
+            ..Default::default()
+        };
+        let mut infinite_certificate = finite.clone();
+        infinite_certificate.diagnostics = infinite;
+        let infinite_json = serde_json::to_string(&infinite_certificate).unwrap();
+        let infinite_restored: RiskCertificate<bool> =
+            serde_json::from_str(&infinite_json).unwrap();
+        assert_eq!(infinite_restored, infinite_certificate);
+        assert_eq!(
+            infinite_restored.diagnostics.risk_adjusted_evalue,
+            Some(EValue::PositiveInfinity)
+        );
+
+        let not_computed = Diagnostics::default();
+        let mut not_computed_certificate = finite.clone();
+        not_computed_certificate.diagnostics = not_computed;
+        let not_computed_json = serde_json::to_string(&not_computed_certificate).unwrap();
+        let not_computed_restored: RiskCertificate<bool> =
+            serde_json::from_str(&not_computed_json).unwrap();
+        assert_eq!(not_computed_restored.diagnostics.risk_adjusted_evalue, None);
+
+        // All three are pairwise distinct after the round trip.
+        assert_ne!(
+            infinite_restored.diagnostics.risk_adjusted_evalue,
+            finite_restored.diagnostics.risk_adjusted_evalue
+        );
+        assert_ne!(
+            infinite_restored.diagnostics.risk_adjusted_evalue,
+            not_computed_restored.diagnostics.risk_adjusted_evalue
+        );
     }
 }

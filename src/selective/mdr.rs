@@ -99,7 +99,7 @@
 //! model is consistent, not both) requires additional estimator
 //! machinery the paper defers to an appendix; see `docs/roadmap.md`.
 
-use crate::certificate::{Diagnostics, RiskCertificate};
+use crate::certificate::{Diagnostics, EValue, RiskCertificate};
 use crate::error::RiskSieveError;
 use crate::guarantee::{
     Assumptions, ExchangeabilityAssumption, GuaranteeKind, ImportanceWeightSource,
@@ -169,7 +169,7 @@ pub fn certify(
         assumptions,
         calibration_size,
         diagnostics: Diagnostics {
-            risk_adjusted_evalue: Some(outcome.value.get()),
+            risk_adjusted_evalue: Some(EValue::Finite(outcome.value)),
             gamma: Some(gamma.get()),
             uninformative_result: Some(!outcome.feasible_threshold_found),
             ..Default::default()
@@ -273,7 +273,7 @@ pub fn certify_weighted(
         assumptions,
         calibration_size,
         diagnostics: Diagnostics {
-            risk_adjusted_evalue: Some(outcome.value.as_f64()),
+            risk_adjusted_evalue: Some(outcome.value),
             gamma: Some(gamma.get()),
             uninformative_result: Some(!outcome.feasible_threshold_found),
             weight_sum: Some(weight_stats.sum()),
@@ -296,6 +296,10 @@ mod tests {
             .collect()
     }
 
+    fn finite(v: f64) -> EValue {
+        EValue::Finite(NonNegative::new("e", v).unwrap())
+    }
+
     #[test]
     fn rejects_mismatched_lengths() {
         let alpha = OpenUnitInterval::new("alpha", 0.3).unwrap();
@@ -311,7 +315,10 @@ mod tests {
         let certificate = certify(&losses(&[1.0]), &[0.0], 1.0, alpha, alpha).unwrap();
         assert!(!certificate.parameter);
         assert_eq!(certificate.guarantee, GuaranteeKind::MarginalDeploymentRisk);
-        assert_eq!(certificate.diagnostics.risk_adjusted_evalue, Some(0.0));
+        assert_eq!(
+            certificate.diagnostics.risk_adjusted_evalue,
+            Some(finite(0.0))
+        );
     }
 
     #[test]
@@ -472,7 +479,7 @@ mod tests {
         )
         .unwrap();
         assert!(!excluded.parameter);
-        assert_eq!(excluded.diagnostics.risk_adjusted_evalue, Some(0.0));
+        assert_eq!(excluded.diagnostics.risk_adjusted_evalue, Some(finite(0.0)));
 
         let cleared = certify_weighted(
             &losses(&[0.0]),

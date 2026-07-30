@@ -100,6 +100,17 @@
 //! `tests::uniform_weight_rescale_leaves_evalue_unchanged` and the
 //! property test in `mdr.rs`.
 //!
+//! This implementation actively *relies on* this invariance for
+//! numerical safety, not just correctness: every weight (calibration and
+//! test alike) is normalized by their shared maximum before any other
+//! computation, so every value used downstream lies in `[0, 1]`.
+//! Computing at the caller's raw scale instead can overflow `f64` for
+//! ordinary-looking finite inputs (for example two weights near
+//! `f64::MAX`), which previously produced a spurious
+//! `EValue::PositiveInfinity` for what is, once the shared scale is
+//! factored out, a genuinely finite e-value -- see
+//! `tests::huge_but_finite_weights_do_not_spuriously_overflow_to_infinity`.
+//!
 //! ## Zero test weight
 //!
 //! When `test_weight == 0`, the `l`-term (`w_{n+1}*l*indicator`) vanishes
@@ -126,16 +137,6 @@ use crate::error::RiskSieveError;
 use crate::numerics::summation::kahan_sum;
 use crate::probability::{ClosedUnitInterval, NonNegative, OpenUnitInterval, check_finite};
 
-fn normalize_zero(x: f64) -> f64 {
-    if x == 0.0 { 0.0 } else { x }
-}
-
-/// See [`super::evalue`]'s identically-named function for the rationale;
-/// the same conservative-rounding argument applies unchanged here.
-fn feasibility_epsilon(rhs: f64) -> f64 {
-    rhs.abs().max(1.0) * 8.0 * f64::EPSILON
-}
-
 /// A weighted risk-adjusted e-value, which -- unlike the unweighted
 /// construction in [`super::evalue`] -- can be mathematically
 /// `+infinity`, not merely large.
@@ -155,37 +156,21 @@ fn feasibility_epsilon(rhs: f64) -> f64 {
 /// Clamping this to a large finite value or silently rejecting it would
 /// misstate the guarantee (AGENTS.md section 8: "never silently saturate
 /// an e-value").
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub enum EValue {
-    /// A finite, non-negative e-value.
-    Finite(NonNegative),
-    /// The e-value's true value is mathematically unbounded -- see this
-    /// type's own docs for the exact (narrow) condition.
-    PositiveInfinity,
+///
+/// Defined in [`crate::certificate`] (re-exported here for backward
+/// compatibility) so [`crate::certificate::Diagnostics::risk_adjusted_evalue`]
+/// can use it without that foundational module depending on this
+/// Milestone-6-specific one.
+pub use crate::certificate::EValue;
+
+fn normalize_zero(x: f64) -> f64 {
+    if x == 0.0 { 0.0 } else { x }
 }
 
-impl EValue {
-    /// Whether thresholding this e-value at `1/alpha` deploys: always
-    /// `true` for [`EValue::PositiveInfinity`] (for any `alpha < 1`),
-    /// otherwise the ordinary finite comparison.
-    pub fn clears_deployment_threshold(&self, alpha: OpenUnitInterval) -> bool {
-        match self {
-            EValue::Finite(value) => value.get() >= 1.0 / alpha.get(),
-            EValue::PositiveInfinity => true,
-        }
-    }
-
-    /// A plain `f64` view for diagnostics, with [`EValue::PositiveInfinity`]
-    /// represented as `f64::INFINITY`. Not a [`NonNegative`]: that type
-    /// rejects infinite values by construction, which is exactly the
-    /// distinction this type exists to preserve.
-    pub fn as_f64(&self) -> f64 {
-        match self {
-            EValue::Finite(value) => value.get(),
-            EValue::PositiveInfinity => f64::INFINITY,
-        }
-    }
+/// See [`super::evalue`]'s identically-named function for the rationale;
+/// the same conservative-rounding argument applies unchanged here.
+fn feasibility_epsilon(rhs: f64) -> f64 {
+    rhs.abs().max(1.0) * 8.0 * f64::EPSILON
 }
 
 /// The result of evaluating Equation 6.1's weighted e-value.
@@ -251,14 +236,30 @@ pub fn weighted_risk_adjusted_evalue(
         check_finite("calibration_scores", score)?;
     }
 
-    let calibration_weight_sum = kahan_sum(calibration_weights.iter().map(|w| w.get()));
-    let total_weight = calibration_weight_sum + test_weight.get();
-    if total_weight == 0.0 {
+    // Normalize every weight (calibration and test alike) by their
+    // shared maximum *before* computing anything else. Equation 6.1 is
+    // invariant to a uniform positive rescaling of every weight together
+    // (see the module docs, "Uniform scale invariance", and
+    // `uniform_weight_rescale_leaves_evalue_unchanged`), so this changes
+    // nothing mathematically -- but it guarantees every weight used from
+    // here on is in `[0, 1]`, with at least one exactly `1.0`, so no
+    // finite input can make `total_weight`, a weighted loss, or
+    // `gamma_scaled` overflow to `+infinity`. Computing at the raw input
+    // scale instead can overflow for finite, non-adversarial-looking
+    // inputs (for example two `NonNegative` weights near `f64::MAX`),
+    // silently producing `EValue::PositiveInfinity` for what is
+    // mathematically a finite e-value once the shared scale cancels --
+    // see `huge_but_finite_weights_do_not_spuriously_overflow_to_infinity`.
+    let max_weight = calibration_weights
+        .iter()
+        .map(|w| w.get())
+        .fold(test_weight.get(), f64::max);
+    if max_weight == 0.0 {
         return Err(RiskSieveError::DegenerateWeights);
     }
 
     let test_score = normalize_zero(test_score);
-    let test_weight = test_weight.get();
+    let test_weight = test_weight.get() / max_weight;
 
     // Grouped by `(score, weighted_loss)`, not score alone -- see
     // `evalue.rs`'s identical fix and its regression test for why a
@@ -268,10 +269,34 @@ pub fn weighted_risk_adjusted_evalue(
         .iter()
         .zip(calibration_losses.iter())
         .zip(calibration_weights.iter())
-        .map(|((&score, &loss), &weight)| (normalize_zero(score), weight.get() * loss.get()))
+        .map(|((&score, &loss), &weight)| {
+            (
+                normalize_zero(score),
+                (weight.get() / max_weight) * loss.get(),
+            )
+        })
         .collect();
     entries.push((test_score, 0.0));
     entries.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.total_cmp(&b.1)));
+
+    // Sum of the *normalized* weights: bounded by `calibration_weights.len() + 1`
+    // (every term is now in `[0, 1]`), so this can never overflow the way
+    // summing raw, unnormalized weights could. Sorted by value via
+    // `total_cmp` before summing -- the same "canonical order, not input
+    // order" fix already applied to `evalue.rs` and `coupled.rs`'s tied
+    // score groups -- so the sum depends only on the multiset of
+    // (normalized) weights, never on the caller's input order. Summing
+    // in caller-supplied order instead is a latent version of that same
+    // bug: normalizing here adds a division's worth of extra rounding to
+    // each term, which is enough to make an already input-order-sensitive
+    // Kahan sum disagree at the last bit between permutations (caught by
+    // `construction_is_permutation_invariant`).
+    let mut normalized_calibration_weights: Vec<f64> = calibration_weights
+        .iter()
+        .map(|w| w.get() / max_weight)
+        .collect();
+    normalized_calibration_weights.sort_by(f64::total_cmp);
+    let total_weight = kahan_sum(normalized_calibration_weights.iter().copied()) + test_weight;
 
     let mut values: Vec<f64> = Vec::new();
     let mut per_value_sum: Vec<f64> = Vec::new();
@@ -603,6 +628,87 @@ mod tests {
         )
         .unwrap();
         assert_ne!(base.value.as_f64(), calib_only_rescaled.value.as_f64());
+    }
+
+    /// Regression: computing at the raw weight scale, `total_weight =
+    /// calibration_weight_sum + test_weight` overflows to `+infinity` for
+    /// weights this large (`f64::MAX + f64::MAX`), which previously made
+    /// this function return `EValue::PositiveInfinity` even though the
+    /// true e-value is finite -- Equation 6.1's shared weight scale
+    /// cancels in the ratio once normalized. Calibration loss `0` and a
+    /// calibration score tied with the test score, weight `f64::MAX` on
+    /// both sides, `gamma = 0.5`: normalizing by the shared max weight
+    /// gives calibration weight `1.0` and test weight `1.0`, so
+    /// `total_weight = 2.0`, `gamma_scaled = 1.0`, weighted calibration
+    /// loss is `0` at every threshold, and the objective at `l = 1` is
+    /// `2.0 / (0 + 1.0) = 2.0` -- the true infimum.
+    #[test]
+    fn huge_but_finite_weights_do_not_spuriously_overflow_to_infinity() {
+        let outcome = weighted_risk_adjusted_evalue(
+            &losses(&[0.0]),
+            &[1.0],
+            &weights(&[f64::MAX]),
+            1.0,
+            weight(f64::MAX),
+            gamma(0.5),
+        )
+        .unwrap();
+        assert_eq!(
+            outcome.value,
+            EValue::Finite(NonNegative::new("e", 2.0).unwrap())
+        );
+    }
+
+    #[test]
+    fn uniform_weight_rescale_near_f64_max_leaves_evalue_unchanged() {
+        let g = gamma(0.6);
+        let base = weighted_risk_adjusted_evalue(
+            &losses(&[0.3, 0.7, 0.1]),
+            &[-1.0, 0.5, 2.0],
+            &weights(&[2.0, 5.0, 1.0]),
+            1.0,
+            weight(3.0),
+            g,
+        )
+        .unwrap();
+        let scale = 1e300;
+        let rescaled = weighted_risk_adjusted_evalue(
+            &losses(&[0.3, 0.7, 0.1]),
+            &[-1.0, 0.5, 2.0],
+            &weights(&[2.0 * scale, 5.0 * scale, 1.0 * scale]),
+            1.0,
+            weight(3.0 * scale),
+            g,
+        )
+        .unwrap();
+        assert_eq!(base.value.as_f64(), rescaled.value.as_f64());
+    }
+
+    #[test]
+    fn subnormal_to_normal_uniform_rescale_leaves_evalue_unchanged() {
+        let g = gamma(0.6);
+        // Entirely subnormal-scale weights (all below `f64::MIN_POSITIVE`'s
+        // normal-range boundary).
+        let subnormal = weighted_risk_adjusted_evalue(
+            &losses(&[0.3, 0.7, 0.1]),
+            &[-1.0, 0.5, 2.0],
+            &weights(&[2e-310, 5e-310, 1e-310]),
+            1.0,
+            weight(3e-310),
+            g,
+        )
+        .unwrap();
+        // Same ratios, rescaled into the ordinary normal range.
+        let normal_scale = weighted_risk_adjusted_evalue(
+            &losses(&[0.3, 0.7, 0.1]),
+            &[-1.0, 0.5, 2.0],
+            &weights(&[2.0, 5.0, 1.0]),
+            1.0,
+            weight(3.0),
+            g,
+        )
+        .unwrap();
+        assert_eq!(subnormal.value.as_f64(), normal_scale.value.as_f64());
     }
 
     #[test]

@@ -133,7 +133,7 @@ pub mod probability;
 pub mod selective;
 pub mod shift;
 
-pub use certificate::{Diagnostics, RiskCertificate};
+pub use certificate::{Diagnostics, EValue, RiskCertificate};
 pub use error::RiskSieveError;
 pub use guarantee::{
     Assumptions, ExchangeabilityAssumption, GuaranteeKind, ImportanceWeightSource,
