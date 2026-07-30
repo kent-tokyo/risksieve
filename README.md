@@ -12,9 +12,11 @@ Milestone 2 (anytime-valid monotone CRC), Milestone 3 (non-monotonic CRC,
 partial), Milestone 4 (SCoRE-MDR, partial), Milestone 5 (SCoRE-SDR), and
 Milestone 6 (distribution shift, partial) are done.** Milestone 5 does not
 yet include the paper's optional randomized-pruning boost (`prune='hete'`
-/ `'homo'` in the official implementation) or weighted SDR; see the
-Milestone 5 paragraph below and `docs/roadmap.md`. Milestone 7 (downstream
-examples) is not implemented yet.
+/ `'homo'` in the official implementation) or weighted SDR; Milestone 6
+covers importance-weighted anytime-valid CRC and weighted SCoRE-MDR, but
+not yet weighted SDR (`SCoRE_SDR_w`) — see the Milestone 5 and 6
+paragraphs below and `docs/roadmap.md`. Milestone 7 (downstream examples)
+is not implemented yet.
 
 Milestone 0 provides:
 
@@ -94,7 +96,29 @@ discovered at runtime as a stopping time, frozen the first time its
 condition holds. `weight_source` is a required, never-defaulted field —
 `KnownDensityRatio` gives the full finite-sample guarantee, `Estimated`
 downgrades to an asymptotic one, since the paper does not establish
-finite-sample validity for estimated weights. Weighted SCoRE is deferred;
+finite-sample validity for estimated weights.
+
+Milestone 6 also adds `risksieve::selective::evalue_weighted::weighted_risk_adjusted_evalue`
+and `risksieve::selective::mdr::certify_weighted`, weighted SCoRE-MDR
+under covariate shift (Bai and Jin (2026), Equation 6.1, Theorem 6.2 and
+6.4). Same `weight_source`-driven guarantee split as the shifted anytime
+controller (`KnownDensityRatio` -> `MarginalDeploymentRisk`, `Estimated`
+-> `Asymptotic`), applied here to a fixed-sample deployment decision
+instead of an anytime one. Calibration points are weighted individually
+(`w(X_i)`), not just the test point, and weights carry no normalization
+requirement — the construction is invariant to rescaling every weight
+(calibration and test) by the same positive constant, but not to a
+non-uniform reweighting. The e-value is `f64::INFINITY` in a narrow,
+non-degenerate case (a concrete instance found while building the oracle
+fixture, not a hypothetical one — see `docs/references.md`'s "Equation
+6.1 audit"), represented by a dedicated `EValue` type
+(`Finite(NonNegative)` / `PositiveInfinity`) rather than clamped to a
+large finite value. Cross-checked against `Tian-Bai/SCoRE`'s own
+`SCoRE_MDR_w` (35 fixture cases, `tests/score_mdr_w_oracle.rs` — two
+independent comparisons per case, since the official package has no
+weighted e-value function of its own to check the e-value against) and
+against a Monte Carlo simulation of the weighted MDR guarantee
+(`tests/statistical_validity_weighted_mdr.rs`). Weighted SDR is deferred;
 see `docs/roadmap.md`.
 
 See `AGENTS.md` section 7 for the full implementation sequence and

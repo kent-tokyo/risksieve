@@ -60,9 +60,15 @@ sufficient if the API can misstate the guarantee (AGENTS.md section 16).
    is a permanent regression guard for a case where independently derived
    dimensional reasoning overrode digit-for-digit-consistent fetched text
    (every fetch of the theorem's correction term misread one function
-   name; see `src/anytime/boundary.rs`'s `weighted_term` doc). The
-   remaining `tests/paper_*.rs` files land as their theorems are
-   implemented.
+   name; see `src/anytime/boundary.rs`'s `weighted_term` doc). Weighted
+   MDR (Equation 6.1, Theorem 6.2/6.4) has no dedicated `tests/paper_*.rs`
+   file of its own: its hand-traceable fixtures (`n=1` cases at weight `1`
+   matching `tests/paper_score_mdr.rs`'s own `n=1` fixtures exactly, and a
+   hand-derived `+infinity` case) live as unit tests directly in
+   `src/selective/evalue_weighted.rs` and `src/selective/mdr.rs`'s
+   `#[cfg(test)]` modules instead — see tier 5 below for its
+   cross-language coverage. The remaining `tests/paper_*.rs` files land as
+   their theorems are implemented.
 3. **Property tests** (`proptest`) — structural invariants such as
    permutation invariance, non-negativity of e-values, and serialization
    preserving semantics. `proptest` is already a dev-dependency; property
@@ -99,7 +105,7 @@ empty) rejection, min/max/ESS tracking, and extreme-but-finite weights.
 Tier 2 has `tests/paper_crc.rs`, `tests/paper_anytime.rs`,
 `tests/paper_nonmonotone.rs`, `tests/paper_score_mdr.rs`,
 `tests/paper_score_sdr.rs`, and `tests/paper_anytime_shifted.rs`. Tier 3
-has ten property tests so far:
+has twelve property tests so far:
 `anytime::calibration::tests::anytime_threshold_sequence_is_non_increasing`
 and `anytime_theorem_4_7_threshold_sequence_is_non_increasing` (in
 `tests/paper_anytime_shifted.rs`), covering the invariant AGENTS.md
@@ -128,9 +134,19 @@ Equation 4.1 derived in that module's docs), plus
 `selective::sdr::tests::coupled_certify_selected_set_is_invariant_to_test_batch_order`
 (in `src/selective/sdr.rs`), checking that permuting the test batch's
 submission order changes neither `tau_hat` nor the selected set of
-identities. No monotonicity/dominance property between the coupled and
-independent constructions is asserted, since neither the paper nor this
-crate proves one. Run all of tiers 1-3 with:
+identities; and, for weighted MDR,
+`selective::evalue_weighted::tests::construction_is_permutation_invariant`
+and `evalues_are_non_negative_fuzzed` (in
+`src/selective/evalue_weighted.rs`), covering calibration permutation
+invariance and e-value non-negativity for Equation 6.1. No
+scale-invariance property test is stated for *unnormalized* weights in
+general (only *uniform* rescaling of every weight together is invariant —
+see that module's docs for why non-uniform rescaling can and does change
+the e-value, checked by
+`non_uniform_rescale_of_calibration_only_can_change_the_evalue` instead).
+No monotonicity/dominance property between the coupled and independent
+constructions is asserted, since neither the paper nor this crate proves
+one. Run all of tiers 1-3 with:
 
 ```bash
 cargo test --all-features
@@ -153,6 +169,39 @@ at the large-scale test's. Run the slower version explicitly:
 cargo test --test statistical_validity -- --ignored --nocapture
 ```
 
+Tier 4 also has `tests/statistical_validity_weighted_mdr.rs` for weighted
+MDR (Equation 6.1, Theorem 6.2): a fast `weighted_mdr_monte_carlo_smoke_test`
+(500 repetitions) and a slower `weighted_mdr_monte_carlo_large_scale`
+(20,000 repetitions, `#[ignore]`d). The DGP splits the covariate into an
+independent score coordinate `X1 ~ Uniform(0,1)` (identical under `P` and
+`Q`) and a risk coordinate `X2` (`~ Uniform(0,1)` under `P`, density `2*x2`
+under `Q`), with loss `L | X ~ Bernoulli(X2)` and known density ratio
+`w(x1,x2) = 2*x2` — deliberately decoupling the score from the shift (an
+earlier, single-coordinate version of this DGP was vacuous: the
+unweighted procedure's score threshold silently self-corrected for a
+shift that lived on the same coordinate it scored by, so it passed the
+check even at weight `1`; see the file's module docs for the full
+account). Three arms share one replication loop: `weighted`
+(`certify_weighted` with the true weights, `KnownDensityRatio`), `naive`
+(the same shifted test point through plain unweighted `certify` — the
+wrong thing to do, included specifically to prove the DGP is not
+vacuous), and `control` (a fully re-drawn no-shift replication, weight
+`1`). At `alpha = gamma = 0.3`, seed `20260730`: at 500 repetitions
+(half-width `0.0607`), `weighted` mean `0.2120`, `control` mean `0.2900`,
+`naive` mean `0.3880`; at 20,000 repetitions (half-width `0.0096`),
+`weighted` mean `0.22485`, `control` mean `0.28780`, `naive` mean
+`0.38010` — `naive` exceeds `alpha` by a wide margin at both repetition
+counts, confirming the DGP genuinely exercises the weighting rather than
+passing vacuously. This file deliberately does not exercise
+`ImportanceWeightSource::Estimated`: a Monte Carlo pass there would only
+bear on Theorem 6.4's asymptotic conclusion, not a finite-sample one, and
+could be misread as validating a guarantee this crate does not make for
+that case. Run the slower version explicitly:
+
+```bash
+cargo test --test statistical_validity_weighted_mdr -- --ignored --nocapture
+```
+
 Tier 5 has `tests/score_sdr_oracle.rs`, cross-checking
 `coupled_risk_adjusted_evalues` (Equation 5.1) against 30 cases generated
 from `Tian-Bai/SCoRE`'s `SCoRE_SDR` (commit
@@ -162,10 +211,42 @@ indices and `tau_hat` exactly. There is no independent-construction
 (Equation 4.1) oracle column in this fixture; see `docs/references.md`
 for why `SCoRE_MDR_bf` was found unsuitable as an oracle for it.
 
-Tier 6 (regressions) has no entries yet. Each remaining tier or
-per-milestone gap activates as the work in `docs/roadmap.md` that needs it
-lands; this file will list the actual test names and fixture locations as
-they are added, rather than describing them abstractly.
+Tier 5 also has `tests/score_mdr_w_oracle.rs`, reading 35 cases from
+`tests/fixtures/score_mdr_w_v0_1_1.json`
+(`scripts/oracles/generate_score_mdr_w.py` generates it against the same
+`Tian-Bai/SCoRE` commit and package version). Unlike the SDR oracle, this
+one makes *two* independent comparisons per test point, because the
+official package has no weighted e-value function at all (only
+`SCoRE_MDR_w`, a decision-only shortcut valid for `gamma <= alpha`): the
+e-value itself is checked against the fixture generator's own
+from-scratch Python breakpoint-enumeration reference implementation of
+Equation 6.1 (not derived from this crate's Rust code, and not from the
+official package), with a combined absolute/relative tolerance (`1e-9`),
+including exact agreement on a `+infinity` case; the deploy/abstain
+decision is checked against the official `SCoRE_MDR_w` shortcut
+separately, and only for cases where `gamma <= alpha` (its unconditionally
+valid regime). See `docs/references.md` for this asymmetry and why it
+exists.
+
+Tier 6 (regressions) has one entry: `risk_adjusted_evalue`
+(`src/selective/evalue.rs`, Equation 4.1) grouped tied calibration scores
+via a sort keyed on score alone, leaving its summed loss dependent on the
+caller's input order rather than only on the calibration multiset — found
+while building the weighted e-value construction, which needed
+`risk_adjusted_evalue` to be genuinely order-invariant for a "weight `1`
+matches unweighted" test to be meaningful. No public guarantee was
+misstated (the affected quantity is an internal summation step, not a
+part of any theorem statement), but the *specific returned e-value* could
+differ by a few ULPs depending on input order for adversarial tied
+inputs. Fixed by sorting by `(score, loss)` and Kahan-summing within
+canonical groups; regression test
+`ties_are_summed_in_a_canonical_order_not_input_order` in
+`src/selective/evalue.rs` checks forward, reversed, and permuted input
+now agree bit-exactly. See `CHANGELOG.md`'s `Fixed` section. Each
+remaining tier or per-milestone gap activates as the work in
+`docs/roadmap.md` that needs it lands; this file will list the actual
+test names and fixture locations as they are added, rather than
+describing them abstractly.
 
 ## Timing comparison: coupled vs. independent SDR (informal)
 

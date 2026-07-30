@@ -9,9 +9,10 @@
 単調CRC)、Milestone 3(非単調CRC、部分的)、Milestone 4(SCoRE-MDR、部分的)、
 Milestone 5(SCoRE-SDR)、Milestone 6(分布シフト、部分的)が完了。**
 Milestone 5には論文のオプション機能であるrandomized pruning(公式実装の
-`prune='hete'` / `'homo'`)とweighted SDRはまだ含まれていない — 詳細は
-下記のMilestone 5の段落と`docs/roadmap.md`を参照。Milestone 7(下流の実例)
-はまだ未実装。
+`prune='hete'` / `'homo'`)とweighted SDRはまだ含まれていない。Milestone 6は
+重要度重み付きanytime-valid CRCと重み付きSCoRE-MDRをカバーするが、weighted
+SDR(`SCoRE_SDR_w`)はまだ含まれていない — 詳細は下記のMilestone 5・6の段落と
+`docs/roadmap.md`を参照。Milestone 7(下流の実例)はまだ未実装。
 
 Milestone 0 で提供するもの:
 
@@ -86,7 +87,29 @@ m* は Milestone 2 のように事前計算できない — Theorem 4.7 の m* �
 暗黙のデフォルトを持たないフィールドであり、`KnownDensityRatio` は
 有限サンプルの保証をフルに与えるが、`Estimated` は漸近的な保証に格下げ
 される — 論文が推定された重みについて有限サンプルの妥当性を示していない
-ため。重み付き SCoRE は見送った(`docs/roadmap.md` 参照)。
+ため。
+
+Milestone 6 ではさらに、分布シフト下での重み付き SCoRE-MDR
+`risksieve::selective::evalue_weighted::weighted_risk_adjusted_evalue` と
+`risksieve::selective::mdr::certify_weighted` を追加した(Bai and Jin
+(2026) の Equation 6.1、Theorem 6.2・6.4)。分布シフト下anytime
+controllerと同じ `weight_source` による保証の切り替え
+(`KnownDensityRatio` → `MarginalDeploymentRisk`、`Estimated` →
+`Asymptotic`)を、anytimeではなく固定サンプルのデプロイ判定に適用したもの。
+キャリブレーション点はテスト点だけでなく個別に重み付けされ(`w(X_i)`)、
+重みには正規化の要件がない — 全ての重み(キャリブレーションとテスト点)を
+同じ正の定数で一律にリスケールしてもe値は不変だが、不均一な再重み付けに
+対しては不変ではない。e値は、狭く非退化な特定のケースで
+`f64::INFINITY` になり得る(oracle fixtureを生成する過程で見つかった
+具体的な事例であり、仮説上のものではない — `docs/references.md`の
+「Equation 6.1 audit」を参照)。これは大きな有限値へクランプするのではなく、
+専用の `EValue` 型(`Finite(NonNegative)` / `PositiveInfinity`)で表現
+している。`Tian-Bai/SCoRE` 自身の `SCoRE_MDR_w` との照合(35件の
+fixture、`tests/score_mdr_w_oracle.rs` — 公式パッケージには重み付きe値
+関数自体が存在しないため、1件につき2種類の独立した比較を実施)と、
+重み付きMDR保証そのもののモンテカルロ・シミュレーション
+(`tests/statistical_validity_weighted_mdr.rs`)で検証している。weighted
+SDR は見送った(`docs/roadmap.md` 参照)。
 
 実装の全体シーケンスは `AGENTS.md` の第7章、現時点でのテスト範囲は
 `docs/validation.md` を参照。

@@ -55,6 +55,13 @@ Three controllers populate this taxonomy so far:
   not separately populated: it follows immediately by summing `m`
   independent `MarginalDeploymentRisk` certificates at the same `alpha`
   (documented, not computed).
+- `selective::mdr::certify_weighted` (Milestone 6, Equation 6.1) extends
+  `certify` to covariate shift, producing `MarginalDeploymentRisk` when
+  `weight_source` is `ImportanceWeightSource::KnownDensityRatio` (Theorem
+  6.2's finite-sample hypothesis) and `Asymptotic` when it is `Estimated`
+  instead (Theorem 6.4's `limsup` conclusion) — the same downgrade pattern
+  as `AnytimeShiftedController::update` below, applied to a fixed-sample
+  rather than anytime-valid setting.
 - `selective::sdr::certify` (Milestone 5) produces `SelectiveDeploymentRisk`
   for a batch of test points. Like MDR, the bound is on the expectation of
   a ratio over the joint draw, not a property of the one realized selected

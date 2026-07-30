@@ -93,16 +93,17 @@ implemented:
 ## Remaining within Milestone 6 (distribution shift)
 
 Importance-weight validation/diagnostics
-(`shift::importance::WeightAccumulator`) and importance-weighted
-anytime-valid CRC (Theorem 4.7, `anytime::shifted::AnytimeShiftedController`)
-are done. Not yet implemented:
+(`shift::importance::WeightAccumulator`), importance-weighted
+anytime-valid CRC (Theorem 4.7, `anytime::shifted::AnytimeShiftedController`),
+and weighted MDR (Equation 6.1, Theorem 6.2/6.4, `SCoRE_MDR_w`) — done in
+`src/selective/evalue_weighted.rs` and `selective::mdr::certify_weighted`
+— are done. Not yet implemented:
 
-- Weighted SCoRE (weighted MDR/SDR under covariate shift, `SCoRE_MDR_w` /
-  `SCoRE_SDR_w`) — `AGENTS.md`'s backlog explicitly orders "shifted
-  anytime CRC" (item 18) before "weighted SCoRE" (item 19); the paper-exact
-  coupled SDR construction (this repository's most recent milestone) is
-  also ordered before it, per "don't implement all theories in one PR".
-  This is the recommended next PR — see this file's closing note.
+- Weighted SDR (`SCoRE_SDR_w`) — the batch/eBH-selection counterpart to
+  weighted MDR, composing `selective::evalue_weighted` with
+  `selective::coupled`'s grouped-threshold representation the way
+  `selective::sdr` composes the unweighted e-value. This is the
+  recommended next PR — see this file's closing note.
 - Independent verification that Theorem 4.7's `m*`, as a data-dependent
   stopping time rather than the deterministic build-time constant Theorem
   4.1's `m*` is, doesn't break any measurability assumption the paper's
@@ -131,10 +132,11 @@ are done. Not yet implemented:
 
 ## Recommended next PR
 
-Weighted SCoRE (`SCoRE_MDR_w` and `SCoRE_SDR_w`, Milestone 6/backlog item
-19) — see `src/selective/coupled.rs` and `src/shift/importance.rs` for the
-building blocks it would compose (grouped threshold representation and
-prefix accumulators from the former, weight validation and diagnostics
-from the latter). Randomized pruning, Python/WASM bindings, and ML model
-training remain out of scope until a milestone explicitly calls for them
-(`AGENTS.md` section 3).
+Weighted SDR (`SCoRE_SDR_w`, Milestone 6/backlog item 19's remaining half)
+— see `src/selective/evalue_weighted.rs` (the weighted e-value engine,
+already done), `src/selective/coupled.rs` (grouped threshold
+representation and prefix accumulators for the cross-test-point
+construction), and `src/shift/importance.rs` (weight validation and
+diagnostics) for the building blocks it would compose. Randomized
+pruning, Python/WASM bindings, and ML model training remain out of scope
+until a milestone explicitly calls for them (`AGENTS.md` section 3).

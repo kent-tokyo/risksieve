@@ -55,6 +55,38 @@
   python3 scripts/audits/compare_score_reference.py --repo /path/to/Tian-Bai/SCoRE/checkout
   ```
 
+## `Tian-Bai/SCoRE` — behavioral oracle for weighted MDR's deployment decision
+
+- **Repository:** <https://github.com/Tian-Bai/SCoRE>
+- **Commit:** `401b7caf6d030825ff67e8f08e44ba15ee8c94af`
+- **Package version:** `0.1.1`
+- **Source file:** `SCoRE/SCoRE.py`
+  (blob SHA `aa9d111b92fcf574b77f232039410e8a4c23f3f5`), specifically the
+  `SCoRE_MDR_w` function.
+- **License:** MIT.
+- **Copyright:** Copyright (c) 2026 Tian Bai and Ying Jin.
+- **What was used:** `SCoRE_MDR_w`'s deployment *decision* (not its
+  e-value — the function returns no e-value at all, only a deploy/abstain
+  decision via a closed-form shortcut valid for `gamma <= alpha`) was used
+  to generate the `official_selected_indices` column of the cross-language
+  oracle fixture `tests/fixtures/score_mdr_w_v0_1_1.json` (via
+  `scripts/oracles/generate_score_mdr_w.py`).
+- **How this crate restructured it:** `src/selective/evalue_weighted.rs`'s
+  `weighted_risk_adjusted_evalue` is an independent derivation from
+  Equation 6.1 (the paper's formula), not a translation of any official
+  function — none exists to translate from. The oracle fixture's own
+  `reference_evalues` column (used to check the e-value itself, separately
+  from the decision) comes from a from-scratch Python reference
+  implementation written for this fixture generator, also independent of
+  both the official package and this crate's Rust code. See
+  `docs/references.md`'s "Equation 6.1 audit" for the full correspondence
+  and why two independent comparisons were needed instead of one.
+- **Fixture provenance:** `tests/fixtures/score_mdr_w_v0_1_1.json`'s own
+  `provenance` object repeats the repository, commit, package version,
+  blob SHA, license, and copyright above, plus the generator seed
+  (`20260730`) and generation date. `tests/score_mdr_w_oracle.rs` reads
+  only this committed JSON; Python is never invoked by `cargo test` or CI.
+
 ## Historical note
 
 No other code or fixtures from external repositories have been adapted

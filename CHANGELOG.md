@@ -300,6 +300,80 @@ All notable changes to `risksieve` are documented here. Format follows
   check, and a property test for the non-increasing threshold sequence
   under randomized weights.
 
+- `risksieve::selective::evalue_weighted::weighted_risk_adjusted_evalue`:
+  the weighted risk-adjusted e-value construction from Bai and Jin (2026),
+  Equation 6.1 (Section 6's covariate-shift extension), computed via the
+  same breakpoint-enumeration approach as the unweighted construction but
+  built as a fully independent implementation rather than a thin wrapper
+  around it (weight `1` is not special-cased into the unweighted code
+  path, to avoid silently coupling their rounding behavior). Calibration
+  points are weighted individually (`w(X_i)`), not just the test point.
+  Introduces `EValue` (`Finite(NonNegative)` / `PositiveInfinity`): unlike
+  Equation 4.1, whose infimum is provably always finite, Equation 6.1's
+  can be `+infinity` when the test point's own contribution to the
+  weighted denominator is zero while its numerator can still clear the
+  deployment threshold — found as a concrete reproducer while generating
+  the oracle fixture below, not a hypothetical case, and represented
+  faithfully rather than clamped to a large finite value. Invariant to
+  rescaling every weight (calibration and test) by the same positive
+  constant; not invariant to non-uniform reweighting (verified by a
+  proptest that also confirms the invariance property isn't vacuous).
+- `risksieve::selective::mdr::certify_weighted`: the weighted extension of
+  Algorithm 1 (SCoRE-MDR) for one test point under covariate shift, taking
+  an explicit, never-defaulted `ImportanceWeightSource`. Produces
+  `GuaranteeKind::MarginalDeploymentRisk` for `KnownDensityRatio` (Theorem
+  6.2's finite-sample hypothesis) and downgrades to `GuaranteeKind::Asymptotic`
+  for `Estimated` (Theorem 6.4's `limsup` conclusion) — the same downgrade
+  pattern `AnytimeShiftedController` already applies for Theorem 4.7's
+  analogous split. `Assumptions::exchangeability` is `Iid`, not
+  `Exchangeable` (Assumption 6.1 states i.i.d. draws within each of the
+  calibration and test distributions). Records the same weight diagnostics
+  (`weight_sum`, `weight_sum_of_squares`, `effective_sample_size`,
+  `weight_range`) as `AnytimeShiftedController`. Single test point per
+  call, matching Equation 6.1's own shape, rather than a batch API (the
+  batch/eBH-selection extension is weighted SDR, out of scope here — see
+  `docs/roadmap.md`).
+- `scripts/oracles/generate_score_mdr_w.py` and
+  `tests/fixtures/score_mdr_w_v0_1_1.json`: a cross-language oracle
+  fixture generated against `Tian-Bai/SCoRE` (commit
+  `401b7caf6d030825ff67e8f08e44ba15ee8c94af`, package version `0.1.1`),
+  covering all-weights-1, calibration-only/test-only/both non-uniform,
+  zero-weight, score/weight ties, all-zero/all-one-loss, empty-batch,
+  zero/all-selection, extreme weight ratio, uniform weight rescale, and a
+  `gamma > alpha` case, plus 20 fixed-seed randomized cases (35 total).
+  Unlike the SDR oracle, this one makes two independent comparisons per
+  case rather than one, since the official package has no weighted
+  e-value function of its own: the e-value itself is checked against the
+  fixture generator's own from-scratch Python reference implementation of
+  Equation 6.1, and the deploy/abstain decision is checked separately
+  against the official `SCoRE_MDR_w` shortcut, only for cases with
+  `gamma <= alpha` (its documented, unconditionally-valid regime). Reuses
+  `scripts/score_provenance.py`'s fail-fast checkout verification. See
+  `docs/references.md`'s "Equation 6.1 audit" for the full correspondence;
+  no formula discrepancy was found against either comparison target.
+- `tests/score_mdr_w_oracle.rs`: reads the fixture above (Python is never
+  invoked by `cargo test`); all 35 cases pass both comparisons.
+- Documented (and covered by a regression test,
+  `certificate_serde_round_trip_does_not_preserve_positive_infinity`) a
+  narrow, pre-existing `serde` limitation surfaced by `EValue`: `serde_json`
+  serializes `Some(f64::INFINITY)` as `null`, so
+  `Diagnostics::risk_adjusted_evalue` cannot be told apart from "not
+  computed" after a round trip when the weighted e-value is genuinely
+  unbounded. Only this auxiliary diagnostic is affected; the certified
+  `parameter` (the actual deploy decision) round-trips correctly.
+- `tests/statistical_validity_weighted_mdr.rs`: a Monte Carlo check for
+  Theorem 6.2, with a deliberately non-vacuous data-generating process — a
+  decoupled score coordinate (identical under calibration and test) and
+  risk coordinate (`Uniform(0,1)` under calibration, density `2x` under
+  test, known density ratio `w(x) = 2x`), plus a `naive` arm applying
+  plain unweighted `certify` to the same shifted test point to confirm
+  the DGP is genuinely discriminating (it violates `alpha`, by a wide
+  margin, at both repetition counts) rather than passing vacuously. A
+  fast 500-repetition smoke test runs in normal CI; a 20,000-repetition
+  version is `#[ignore]`d. Deliberately does not exercise
+  `ImportanceWeightSource::Estimated`, since a Monte Carlo pass there
+  would only bear on Theorem 6.4's asymptotic conclusion, not a
+  finite-sample one.
 - `docs/roadmap.md`: the tracked, publishable backlog that README,
   rustdoc, and `docs/validation.md` now point to, replacing the local-only
   `tasks/todo.md` (which is real and still exists locally, but was never
@@ -343,8 +417,11 @@ Theorem 4.6 (the extra thresholding condition for `gamma > alpha`) is not
 implemented, and Proposition 4.4's shortcut is verified but not wired in
 as a separate code path. Within Milestone 5, randomized pruning (the
 official implementation's optional `prune='hete'` / `'homo'` power boost)
-and weighted SDR are not implemented. Within Milestone 6, weighted SCoRE
-(weighted MDR/SDR) is not implemented — deferred in favor of the shifted
-anytime controller and the paper-exact coupled SDR construction, per
-AGENTS.md's backlog ordering. See `docs/roadmap.md` for the complete,
-maintained backlog.
+and weighted SDR are not implemented. Within Milestone 6, weighted SDR
+(`SCoRE_SDR_w`) is not implemented — the recommended next PR, composing
+`selective::evalue_weighted` with `selective::coupled`'s grouped-threshold
+representation the way `selective::sdr` composes the unweighted e-value.
+Remark 6.6's doubly-robust refinement (weighted MDR with only one of the
+weight or risk model consistent) is also not implemented, deferred to an
+appendix the paper does not detail. See `docs/roadmap.md` for the
+complete, maintained backlog.

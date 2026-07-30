@@ -97,7 +97,12 @@ cross-checked, and `src/selective/coupled.rs` for Equation 5.1, Theorem
 | Algorithm 2 (SCoRE-SDR), independent e-value | `src/selective/sdr.rs::certify_independent`, composing `ebh::select` with Milestone 4's `evalue::risk_adjusted_evalue` applied independently per test point; kept for comparison and backward compatibility |
 | Equation 5.1 / Theorem 5.1 / Algorithm 3 (the paper's own cross-test-point-coupled e-value, its validity, and its efficient computation) | `src/selective/coupled.rs::coupled_risk_adjusted_evalues`, independently derived from the equation (not translated from `SCoRE_SDR`) and cross-checked against it; see "Equation 5.1 audit" below |
 | Zero-selection behavior | `src/selective/ebh.rs::select` (returns an empty, valid selection when no `tau` qualifies) and `src/selective/sdr.rs::realized_selective_risk` (the `max(1, selected_count)` denominator) |
-| Weighted extensions under covariate shift | not yet implemented — deferred within Milestone 6 in favor of the shifted anytime controller (AGENTS.md's backlog item 18 before item 19); see `docs/roadmap.md` |
+| Assumption 6.1 (i.i.d. covariate shift, known density ratio `w(.)`) | `src/selective/mdr.rs::certify_weighted`'s `ImportanceWeightSource` parameter and `ExchangeabilityAssumption::Iid` |
+| Equation 6.1 (weighted risk-adjusted e-value) | `src/selective/evalue_weighted.rs::weighted_risk_adjusted_evalue`, tested in `tests/score_mdr_w_oracle.rs`; see "Equation 6.1 audit" below |
+| Theorem 6.2 (weighted MDR control, known density ratio) | `src/selective/mdr.rs::certify_weighted` with `ImportanceWeightSource::KnownDensityRatio` -> `GuaranteeKind::MarginalDeploymentRisk`; Monte Carlo checked in `tests/statistical_validity_weighted_mdr.rs` |
+| Theorem 6.4 (weighted MDR, consistent independently-estimated weights, asymptotic) | `src/selective/mdr.rs::certify_weighted` with `ImportanceWeightSource::Estimated` -> `GuaranteeKind::Asymptotic`; not Monte Carlo tested (a finite-sample simulation cannot validate a `limsup` claim — see `docs/validation.md`) |
+| Remark 6.6 (doubly robust refinement) | not implemented — needs additional estimator machinery the paper defers to an appendix; see `docs/roadmap.md` |
+| Weighted SDR (`SCoRE_SDR_w`) | not yet implemented — the recommended next PR; see `docs/roadmap.md` |
 
 ### Equation 5.1 audit
 
@@ -180,6 +185,67 @@ confirmed numerically, not guessed:**
   (`tests/paper_score_sdr.rs::score_algorithm_2_sdr_coupled_and_independent_can_disagree`),
   not against this known-incomplete function.
 
+### Equation 6.1 audit
+
+Correspondence between the paper's own notation, `SCoRE_MDR_w`'s variable
+names, and this crate's `src/selective/evalue_weighted.rs` (the full
+derivation lives in that module's doc comment):
+
+| Concept | Paper (Equation 6.1) | `SCoRE_MDR_w` | This crate |
+|---|---|---|---|
+| Known density ratio | `w(X_i) = dQ/dP(X_i)` | `wcalib`, `wtest` (caller-supplied) | `calibration_weights: &[NonNegative]`, `test_weight: NonNegative` |
+| Weighted cumulative calibration loss at/below a threshold | `sum_i w_i * L_i * 1{s(X_i)<=t}` | (folded into the shortcut's running sum) | grouped, Kahan-summed `weight * loss` per canonical `(score, weighted_loss)` group |
+| Normalizing constant | `sum_i w_i + w_{n+1}` | (implicit) | `total_weight` (`kahan_sum(calibration_weights) + test_weight`) |
+| Breakpoint infimum over `l in [0,1]` | Equation 6.1's own infimum | not computed — the official package has no weighted e-value function; `SCoRE_MDR_w` only ever returns the decision, via a closed-form shortcut valid for `gamma <= alpha` | `weighted_risk_adjusted_evalue`'s breakpoint enumeration, independently derived (see "no oracle for the e-value itself" below) |
+| Final e-value | `E^w_{gamma,n+1}` | not returned by the package at all | `EValue::Finite(NonNegative)` or `EValue::PositiveInfinity` |
+| Deployment decision | `1{E^w_{gamma,n+1} >= 1/alpha}` | `SCoRE_MDR_w`'s return value | `EValue::clears_deployment_threshold` |
+
+**No oracle for the e-value itself, only for the decision.** Unlike
+`SCoRE_SDR` (which returns e-values `SCoRE_SDR_w` could be cross-checked
+against directly), the official package's weighted MDR entry point,
+`SCoRE_MDR_w`, is decision-only and does not expose a weighted e-value at
+all — there is no function to import and call for that column. The oracle
+fixture (`tests/fixtures/score_mdr_w_v0_1_1.json`,
+`scripts/oracles/generate_score_mdr_w.py`) therefore makes two independent
+comparisons rather than one: `reference_evalues`, checked against the
+fixture generator's own from-scratch Python breakpoint-enumeration
+implementation of Equation 6.1 (written independently of both this
+crate's Rust code and of the official package, since neither could serve
+as a ground truth for the e-value itself); and `official_selected_indices`,
+checked against the actual `SCoRE_MDR_w` shortcut, but only for cases with
+`gamma <= alpha` — its documented, unconditionally-valid regime. All 35
+fixture cases (`tests/score_mdr_w_oracle.rs`) pass both comparisons,
+including a `+infinity` case (zero calibration weight, zero test weight
+combined with zero weighted loss) where the reference implementation,
+`SCoRE_MDR_w`'s shortcut, and this crate's `weighted_risk_adjusted_evalue`
+all independently agree the point should deploy. No formula discrepancy
+was found between this crate's construction and either comparison target
+— unlike Equation 5.1 (see the audit above), this audit did not surface a
+difference requiring documentation and a judgment call.
+
+**`gamma`'s domain.** Theorem 6.2 states the same `gamma in (0,1)` domain
+as the unweighted Theorem 4.2 (unlike Theorem 5.1's SDR extension, which
+needed a wider domain for its extra `m/(n+1)` normalizer) — confirmed
+directly from the paper text, not inferred by analogy — so
+`certify_weighted` reuses `OpenUnitInterval` unchanged, with no new domain
+analysis or clamping needed.
+
+**`EValue::PositiveInfinity`.** Equation 4.1's unweighted construction is
+provably always finite (every candidate objective value is a ratio with a
+strictly positive denominator by construction). Equation 6.1's weighted
+construction is not: when the test point's own weighted contribution to
+the denominator is zero (test weight zero, or test weight positive but
+its weighted loss zero at every candidate `l`) while its numerator
+contribution can still reach the deployment threshold, the true
+mathematical infimum is `+infinity`, not a large finite number. This was
+found as a concrete, reproducible case while generating the oracle
+fixture above (not a hypothetical edge case), and cross-validated against
+`SCoRE_MDR_w`'s own shortcut, which independently agrees the point should
+deploy. Representing this as a dedicated `EValue::PositiveInfinity`
+variant, rather than clamping to `f64::MAX` or a similar sentinel, avoids
+silently understating an unbounded e-value as merely large; see
+`src/selective/evalue_weighted.rs`'s module docs for the full case.
+
 **Selection-power comparison (measured, not asserted):** the coupled and
 independent constructions select different sets on some inputs (see the
 fixture above: coupled selects a test point the independent construction
@@ -250,7 +316,8 @@ Theorem 5.1; randomized pruning and weighted SDR deferred — see
   label-requiring realized-risk helper.
 
 **Milestone 6** provides importance-weighted anytime-valid CRC (Theorem
-4.7; weighted SCoRE deferred — see the table above):
+4.7) and weighted SCoRE-MDR (Equation 6.1, Theorem 6.2/6.4; weighted SDR
+deferred — see the table above):
 
 - `src/shift/importance.rs::WeightAccumulator` — non-negative finite
   weight validation, compensated running sum/sum-of-squares, min/max,
@@ -261,6 +328,12 @@ Theorem 5.1; randomized pruning and weighted SDR deferred — see
 - `src/anytime/shifted.rs::AnytimeShiftedController` — the shifted
   controller, with `m*` discovered at runtime as a stopping time on the
   realized weights rather than precomputed at build time.
+- `src/selective/evalue_weighted.rs::weighted_risk_adjusted_evalue` — the
+  weighted risk-adjusted e-value construction, including the
+  `EValue::PositiveInfinity` case (see "Equation 6.1 audit" above).
+- `src/selective/mdr.rs::certify_weighted` — the weighted deployment
+  decision, downgrading its `GuaranteeKind` to `Asymptotic` for
+  `ImportanceWeightSource::Estimated`.
 
 See `guarantees.md` and `assumptions.md` for the vocabulary itself, and
 AGENTS.md section 7 for the full milestone sequence.

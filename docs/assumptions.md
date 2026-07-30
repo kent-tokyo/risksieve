@@ -15,7 +15,7 @@ statistical library can overstate what it proves — see AGENTS.md section 4.
 | `right_continuity` | Whether the relevant statistic is right-continuous, as some threshold-search arguments require | caller-declared, not checkable from finitely many observations |
 | `symmetry` | Whether the optimization procedure is permutation-invariant | proven by construction for symmetric primitives the library ships; caller-declared (`CallerAsserted`) for optimizers supplied by the caller |
 | `stability` | Evidence behind a beta-stability constant | `Analytic` is proven by an external reference; `UserSupplied` is caller-declared; `Estimated` is computed by the library from data but is itself only an estimate, not a proof |
-| `shift` | Whether, and how, covariate shift is corrected for | `NoShift` is caller-declared; `CovariateShift` further distinguishes `KnownDensityRatio` (caller-declared as known, backs `AnytimeHighProbability` in `anytime::AnytimeShiftedController`) from `Estimated` (caller-declared as an estimate, backs only `Asymptotic`) |
+| `shift` | Whether, and how, covariate shift is corrected for | `NoShift` is caller-declared; `CovariateShift` further distinguishes `KnownDensityRatio` (caller-declared as known, backs `AnytimeHighProbability` in `anytime::AnytimeShiftedController` and `MarginalDeploymentRisk` in `selective::mdr::certify_weighted`) from `Estimated` (caller-declared as an estimate, backs only `Asymptotic` in both) |
 
 ## The four categories
 
@@ -87,3 +87,18 @@ directly determines the certificate's `GuaranteeKind`
 (`AnytimeHighProbability` for `KnownDensityRatio`, `Asymptotic` for
 `Estimated`), not merely descriptive metadata the way most other fields
 are for other controllers.
+
+`selective::mdr::certify_weighted` (Milestone 6, Equation 6.1) sets the
+same `monotonicity`/`right_continuity`/`stability` defaults as
+`mdr::certify`, for the same reason (still a single deploy/abstain
+decision, no parameter search), and `symmetry` is `ProvenSymmetric` for
+the same reason (Equation 6.1 depends on calibration only as a multiset
+of `(score, weight, loss)` triples — checked by a permutation property
+test in `src/selective/evalue_weighted.rs`). Unlike `mdr::certify`,
+`exchangeability` is `Iid`, not `Exchangeable`: Assumption 6.1 states
+i.i.d. draws within each of the calibration (`P`) and test (`Q`)
+distributions, not mere exchangeability. `shift` is
+`CovariateShift { weight_source }`, taken directly from the caller's
+`weight_source` argument — the same caller-declared,
+directly-guarantee-determining pattern as `AnytimeShiftedController`
+above, now for a fixed-sample rather than anytime-valid certificate.
