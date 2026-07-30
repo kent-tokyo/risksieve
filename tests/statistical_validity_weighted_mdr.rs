@@ -4,36 +4,57 @@
 //!
 //! ## Data-generating process
 //!
-//! Calibration covariates `X_i ~ P = Uniform(0,1)`, `i = 1..n`. The test
-//! covariate `X_{n+1} ~ Q`, with density `q(x) = 2x` on `[0,1]` (sampled by
-//! inverse CDF: `X = sqrt(U)`, `U ~ Uniform(0,1)`) -- a deliberately simple
-//! shift with a closed-form, exactly *known* density ratio
-//! `w(x) = dQ/dP(x) = q(x)/p(x) = 2x`, satisfying Assumption 6.1 (`w`
-//! depends only on the covariate, not the label). Every point's loss,
-//! calibration or test, is drawn `L | X ~ Bernoulli(X)` -- the *same*
-//! conditional law under both `P` and `Q`, since Assumption 6.1 requires
-//! `P` and `Q` to share the conditional distribution of `Y` given `X` and
-//! differ only in `X`'s marginal. The score is `s(x) = x`.
+//! Each point's covariate is a pair `(X1, X2)`. `X1` is the score
+//! coordinate: `X1 ~ Uniform(0,1)` under *both* calibration (`P`) and test
+//! (`Q`), so it carries no information about the shift. `X2` is the risk
+//! coordinate: `X2 ~ P = Uniform(0,1)` for calibration, `X2 ~ Q` for the
+//! test point, with `Q` having density `q(x2) = 2*x2` on `[0,1]` (sampled
+//! by inverse CDF: `X2 = sqrt(U)`). `X1` and `X2` are independent, so the
+//! known density ratio depends only on the covariate,
+//! `w(x1,x2) = dQ/dP(x1,x2) = 2*x2`, satisfying Assumption 6.1. The loss
+//! is `L | X ~ Bernoulli(X2)` under both `P` and `Q` (same conditional
+//! law given the covariate), and the score is `s(x1,x2) = x1`.
 //!
-//! Weights are `w(X_i) = 2*X_i` for every calibration point and the test
-//! point alike (Equation 6.1 weights calibration points by `w(X_i)`, not
-//! by `1`), passed to `certify_weighted` as
-//! `ImportanceWeightSource::KnownDensityRatio`.
+//! This decoupling is deliberate, not incidental: an earlier version of
+//! this test used a *single* coordinate as both the score and the risk
+//! driver (`s(x) = x`, `L | X ~ Bernoulli(X)`, shift on that same `x`).
+//! That design was vacuous -- the unweighted procedure's score-based
+//! threshold already "sees" the shift (a higher covariate both scores
+//! higher and shifts more likely under `Q`), so it self-corrects for
+//! exactly the shift being introduced, and passes even with every weight
+//! set to `1`. Passing a check that an unweighted procedure would also
+//! pass demonstrates nothing about Equation 6.1. Decoupling the score
+//! (`X1`) from the risk driver (`X2`) removes that confound: the
+//! unweighted procedure's threshold, based only on `X1`, cannot detect or
+//! compensate for a shift that lives entirely in `X2`. See the `naive`
+//! arm below, which confirms this empirically.
 //!
-//! A no-shift control replaces `Q` with `P` itself and every weight with
-//! `1.0`, checking that `certify_weighted` behaves sanely when there is, in
-//! fact, no shift.
+//! ## Three arms, same replication loop
+//!
+//! - `weighted`: the test point is drawn from `Q`; `certify_weighted` is
+//!   given the true weights `w(x1,x2) = 2*x2` and
+//!   `ImportanceWeightSource::KnownDensityRatio`. Theorem 6.2 says this
+//!   arm's Monte Carlo mean should respect `alpha`.
+//! - `naive`: the *same* `Q`-drawn test point as `weighted`, but run
+//!   through plain unweighted `certify` (equivalently, `certify_weighted`
+//!   with every weight `1`), which is the wrong thing to do under shift.
+//!   This arm is expected to *exceed* `alpha` -- its purpose is to prove
+//!   the DGP is not vacuous, not to check a guarantee this crate makes.
+//! - `control`: a fully re-drawn no-shift replication (`X2 ~ P` for the
+//!   test point too), weights `1`, `certify_weighted` with
+//!   `KnownDensityRatio`. Sanity check that nothing breaks, and that the
+//!   bound holds just as comfortably, when there is in fact no shift.
 //!
 //! ## What this test does and does not establish
 //!
-//! Theorem 6.2 is a finite-sample guarantee for `KnownDensityRatio`; this
-//! Monte Carlo check is consistent with that theorem holding, for this one
-//! DGP, at this one `alpha`. It is deliberately **not** run against
-//! `ImportanceWeightSource::Estimated` at all: a Monte Carlo pass under any
-//! estimated-weight DGP would only ever bear on Theorem 6.4's asymptotic
-//! (`limsup`) conclusion, not on a finite-sample claim, and could easily be
-//! misread as validating one -- see `mdr.rs`'s module docs for the
-//! `Asymptotic` downgrade this crate already applies to that case.
+//! Theorem 6.2 is a finite-sample guarantee for `KnownDensityRatio`; the
+//! `weighted` and `control` arms are consistent with that theorem holding,
+//! for this one DGP, at this one `alpha`. This file deliberately does
+//! **not** exercise `ImportanceWeightSource::Estimated`: a Monte Carlo pass
+//! under any estimated-weight DGP would only ever bear on Theorem 6.4's
+//! asymptotic (`limsup`) conclusion, not a finite-sample claim, and could
+//! easily be misread as validating one -- see `mdr.rs`'s module docs for
+//! the `Asymptotic` downgrade this crate already applies to that case.
 //!
 //! ## RNG and acceptance criterion
 //!
@@ -44,9 +65,12 @@
 //! test-utility module. Each replication's contribution
 //! (`realized_loss * deploy_indicator`) is bounded in `[0,1]`, so the same
 //! `sqrt(ln(2/delta) / (2R))` half-width applies to the Monte Carlo mean of
-//! `R` i.i.d. replications.
+//! `R` i.i.d. replications, in either direction (the `naive` arm's
+//! assertion is the mirror image: `mean > alpha + half_width` would be too
+//! strict a bound to demand exceedance by, so it instead asserts exceedance
+//! of `alpha` alone, which the observed margin clears with room to spare).
 
-use risksieve::selective::mdr::certify_weighted;
+use risksieve::selective::mdr::{certify, certify_weighted};
 use risksieve::{ClosedUnitInterval, ImportanceWeightSource, NonNegative, OpenUnitInterval};
 
 const SEED: u64 = 20260730;
@@ -81,8 +105,8 @@ impl SplitMix64 {
         if self.next_unit() < p { 1.0 } else { 0.0 }
     }
 
-    /// `X ~ Q`, density `q(x) = 2x` on `[0,1]`, by inverse CDF.
-    fn next_shifted_covariate(&mut self) -> f64 {
+    /// `X2 ~ Q`, density `q(x2) = 2*x2` on `[0,1]`, by inverse CDF.
+    fn next_shifted_risk_coordinate(&mut self) -> f64 {
         self.next_unit().sqrt()
     }
 }
@@ -96,7 +120,8 @@ fn weight(v: f64) -> NonNegative {
 }
 
 struct Replication {
-    shifted_mdr_contribution: f64,
+    weighted_mdr_contribution: f64,
+    naive_mdr_contribution: f64,
     control_mdr_contribution: f64,
 }
 
@@ -105,43 +130,53 @@ fn run_replication(
     alpha: OpenUnitInterval,
     gamma: OpenUnitInterval,
 ) -> Replication {
-    let mut calibration_scores = Vec::with_capacity(CALIBRATION_SIZE);
+    let mut scores = Vec::with_capacity(CALIBRATION_SIZE);
+    let mut risk_coordinates = Vec::with_capacity(CALIBRATION_SIZE);
     let mut calibration_losses = Vec::with_capacity(CALIBRATION_SIZE);
     for _ in 0..CALIBRATION_SIZE {
-        let x = rng.next_unit();
-        let loss = rng.next_bernoulli(x);
-        calibration_scores.push(x);
+        let x1 = rng.next_unit();
+        let x2 = rng.next_unit();
+        let loss = rng.next_bernoulli(x2);
+        scores.push(x1);
+        risk_coordinates.push(x2);
         calibration_losses.push(ClosedUnitInterval::new("loss", loss).unwrap());
     }
-    let calibration_weights_shifted: Vec<NonNegative> = calibration_scores
+    let calibration_weights_shifted: Vec<NonNegative> = risk_coordinates
         .iter()
-        .map(|&x| weight(2.0 * x))
+        .map(|&x2| weight(2.0 * x2))
         .collect();
-    let calibration_weights_control: Vec<NonNegative> =
-        calibration_scores.iter().map(|_| weight(1.0)).collect();
+    let calibration_weights_one: Vec<NonNegative> =
+        risk_coordinates.iter().map(|_| weight(1.0)).collect();
 
-    let test_x_shifted = rng.next_shifted_covariate();
-    let test_loss_shifted = rng.next_bernoulli(test_x_shifted);
-    let test_x_control = rng.next_unit();
-    let test_loss_control = rng.next_bernoulli(test_x_control);
+    // Shared test point for the `weighted` and `naive` arms: score X1 is
+    // unshifted, risk coordinate X2 is drawn from Q.
+    let test_score = rng.next_unit();
+    let test_risk_shifted = rng.next_shifted_risk_coordinate();
+    let test_loss_shifted = rng.next_bernoulli(test_risk_shifted);
 
-    let shifted_certificate = certify_weighted(
+    let weighted_certificate = certify_weighted(
         &calibration_losses,
-        &calibration_scores,
+        &scores,
         &calibration_weights_shifted,
-        test_x_shifted,
-        weight(2.0 * test_x_shifted),
+        test_score,
+        weight(2.0 * test_risk_shifted),
         alpha,
         gamma,
         ImportanceWeightSource::KnownDensityRatio,
     )
     .expect("valid simulated input");
 
+    let naive_certificate = certify(&calibration_losses, &scores, test_score, alpha, gamma)
+        .expect("valid simulated input");
+
+    // Independently re-drawn no-shift replication for the `control` arm.
+    let test_risk_control = rng.next_unit();
+    let test_loss_control = rng.next_bernoulli(test_risk_control);
     let control_certificate = certify_weighted(
         &calibration_losses,
-        &calibration_scores,
-        &calibration_weights_control,
-        test_x_control,
+        &scores,
+        &calibration_weights_one,
+        test_score,
         weight(1.0),
         alpha,
         gamma,
@@ -150,7 +185,12 @@ fn run_replication(
     .expect("valid simulated input");
 
     Replication {
-        shifted_mdr_contribution: if shifted_certificate.parameter {
+        weighted_mdr_contribution: if weighted_certificate.parameter {
+            test_loss_shifted
+        } else {
+            0.0
+        },
+        naive_mdr_contribution: if naive_certificate.parameter {
             test_loss_shifted
         } else {
             0.0
@@ -163,21 +203,24 @@ fn run_replication(
     }
 }
 
-fn run_simulation(repetitions: u32) -> (f64, f64) {
+fn run_simulation(repetitions: u32) -> (f64, f64, f64) {
     let alpha = OpenUnitInterval::new("alpha", ALPHA).unwrap();
     let gamma = OpenUnitInterval::new("gamma", GAMMA).unwrap();
     let mut rng = SplitMix64::new(SEED);
 
-    let mut shifted_sum = 0.0_f64;
+    let mut weighted_sum = 0.0_f64;
+    let mut naive_sum = 0.0_f64;
     let mut control_sum = 0.0_f64;
     for _ in 0..repetitions {
         let replication = run_replication(&mut rng, alpha, gamma);
-        shifted_sum += replication.shifted_mdr_contribution;
+        weighted_sum += replication.weighted_mdr_contribution;
+        naive_sum += replication.naive_mdr_contribution;
         control_sum += replication.control_mdr_contribution;
     }
 
     (
-        shifted_sum / repetitions as f64,
+        weighted_sum / repetitions as f64,
+        naive_sum / repetitions as f64,
         control_sum / repetitions as f64,
     )
 }
@@ -187,34 +230,41 @@ fn run_simulation(repetitions: u32) -> (f64, f64) {
 /// Recorded per AGENTS.md section 9.4 / this crate's Tier 4 policy:
 /// - RNG: hand-rolled SplitMix64 (see module docs), seed `20260730`.
 /// - Repetitions: `500`.
-/// - DGP: `KnownDensityRatio` covariate shift (`X ~ Q`, density `2x`,
-///   weight `w(x) = 2x`) plus a no-shift `weight = 1` control, both against
-///   calibration `X_i ~ Uniform(0,1)`; see module docs.
+/// - DGP: decoupled score/risk-coordinate `KnownDensityRatio` covariate
+///   shift, plus a `naive` (unweighted, on the same shifted test point)
+///   arm and a no-shift `control` arm; see module docs.
 /// - Calibration size `30`, `alpha = gamma = 0.3`.
-/// - Acceptance: `observed_mean <= alpha + hoeffding_half_width(500, 0.05)`
-///   (half-width `~0.061` at this repetition count -- wide enough that this
-///   smoke test mainly catches a badly broken implementation, not a tight
-///   bound; see `docs/validation.md` and the slower test below).
+/// - Acceptance: `weighted_mean <= alpha + hoeffding_half_width(500, 0.05)`
+///   and same for `control_mean`; `naive_mean > alpha` (proves the DGP is
+///   not vacuous -- see module docs). Half-width `~0.061` at this
+///   repetition count -- wide enough that this smoke test mainly catches a
+///   badly broken implementation, not a tight bound; see
+///   `docs/validation.md` and the slower test below.
 /// - risksieve version: `env!("CARGO_PKG_VERSION")`.
 #[test]
 fn weighted_mdr_monte_carlo_smoke_test() {
     const REPETITIONS: u32 = 500;
     let half_width = hoeffding_half_width(REPETITIONS, DELTA);
-    let (shifted_mean, control_mean) = run_simulation(REPETITIONS);
+    let (weighted_mean, naive_mean, control_mean) = run_simulation(REPETITIONS);
 
     println!(
         "risksieve {}: weighted MDR smoke test, {REPETITIONS} reps, half_width={half_width:.4}, \
-         shifted_mean={shifted_mean:.4}, control_mean={control_mean:.4}",
+         weighted_mean={weighted_mean:.4}, naive_mean={naive_mean:.4}, control_mean={control_mean:.4}",
         env!("CARGO_PKG_VERSION")
     );
 
     assert!(
-        shifted_mean <= ALPHA + half_width,
-        "shifted weighted MDR {shifted_mean} exceeds alpha {ALPHA} + half-width {half_width}"
+        weighted_mean <= ALPHA + half_width,
+        "weighted MDR {weighted_mean} exceeds alpha {ALPHA} + half-width {half_width}"
     );
     assert!(
         control_mean <= ALPHA + half_width,
         "control (no-shift) MDR {control_mean} exceeds alpha {ALPHA} + half-width {half_width}"
+    );
+    assert!(
+        naive_mean > ALPHA,
+        "naive (unweighted-on-shifted-data) MDR {naive_mean} did not exceed alpha {ALPHA}; \
+         the DGP may have become vacuous with respect to the weighting -- see module docs"
     );
 }
 
@@ -234,20 +284,26 @@ fn weighted_mdr_monte_carlo_smoke_test() {
 fn weighted_mdr_monte_carlo_large_scale() {
     const REPETITIONS: u32 = 20_000;
     let half_width = hoeffding_half_width(REPETITIONS, DELTA);
-    let (shifted_mean, control_mean) = run_simulation(REPETITIONS);
+    let (weighted_mean, naive_mean, control_mean) = run_simulation(REPETITIONS);
 
     println!(
         "risksieve {}: weighted MDR large-scale test, {REPETITIONS} reps, \
-         half_width={half_width:.5}, shifted_mean={shifted_mean:.5}, control_mean={control_mean:.5}",
+         half_width={half_width:.5}, weighted_mean={weighted_mean:.5}, naive_mean={naive_mean:.5}, \
+         control_mean={control_mean:.5}",
         env!("CARGO_PKG_VERSION")
     );
 
     assert!(
-        shifted_mean <= ALPHA + half_width,
-        "shifted weighted MDR {shifted_mean} exceeds alpha {ALPHA} + half-width {half_width}"
+        weighted_mean <= ALPHA + half_width,
+        "weighted MDR {weighted_mean} exceeds alpha {ALPHA} + half-width {half_width}"
     );
     assert!(
         control_mean <= ALPHA + half_width,
         "control (no-shift) MDR {control_mean} exceeds alpha {ALPHA} + half-width {half_width}"
+    );
+    assert!(
+        naive_mean > ALPHA,
+        "naive (unweighted-on-shifted-data) MDR {naive_mean} did not exceed alpha {ALPHA}; \
+         the DGP may have become vacuous with respect to the weighting -- see module docs"
     );
 }

@@ -52,6 +52,16 @@ pub struct Diagnostics {
     /// (Bai and Jin 2026, Equation 4.1) before thresholding it into a
     /// deployment decision. Recorded so the magnitude behind the
     /// boolean decision stays auditable, not just the decision itself.
+    ///
+    /// `selective::mdr::certify_weighted`'s weighted construction
+    /// (`selective::evalue_weighted::EValue`) can genuinely be
+    /// `f64::INFINITY` in a narrow, non-degenerate case (see that module's
+    /// docs). This plain `f64` field carries that value faithfully in
+    /// memory, but under the `serde` feature, `serde_json` serializes
+    /// `Some(f64::INFINITY)` as `null`, which deserializes back as `None`
+    /// -- indistinguishable from "not computed". This does not affect the
+    /// certified `parameter` (the actual deploy decision), only this
+    /// auxiliary diagnostic; see `certificate_serde_round_trip_does_not_preserve_positive_infinity`.
     pub risk_adjusted_evalue: Option<f64>,
     /// The calibration-threshold parameter `gamma` (Bai and Jin 2026,
     /// Equation 4.1) actually used to compute `risk_adjusted_evalue`.
@@ -152,5 +162,30 @@ mod tests {
         let json = serde_json::to_string(&certificate).unwrap();
         let restored: RiskCertificate<f64> = serde_json::from_str(&json).unwrap();
         assert_eq!(restored, certificate);
+    }
+
+    /// Documents a known, narrow limitation (see `risk_adjusted_evalue`'s
+    /// doc comment): a `+infinity` weighted e-value round-trips through
+    /// `serde_json` as `None`, not `Some(f64::INFINITY)`. Only the
+    /// diagnostic is affected -- the certified `parameter` is untouched.
+    #[cfg(feature = "serde")]
+    #[test]
+    fn certificate_serde_round_trip_does_not_preserve_positive_infinity() {
+        let certificate = RiskCertificate {
+            parameter: true,
+            target_risk: 0.1,
+            certified_upper_bound: 0.1,
+            guarantee: crate::guarantee::GuaranteeKind::MarginalDeploymentRisk,
+            assumptions: sample_assumptions(),
+            calibration_size: 1,
+            diagnostics: Diagnostics {
+                risk_adjusted_evalue: Some(f64::INFINITY),
+                ..Default::default()
+            },
+        };
+        let json = serde_json::to_string(&certificate).unwrap();
+        let restored: RiskCertificate<bool> = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.diagnostics.risk_adjusted_evalue, None);
+        assert_eq!(restored.parameter, certificate.parameter);
     }
 }
