@@ -74,6 +74,7 @@
 //! were separately confirmed from the paper's problem-setup section.
 
 use crate::error::RiskSieveError;
+use crate::numerics::summation::kahan_sum;
 use crate::probability::{ClosedUnitInterval, NonNegative, OpenUnitInterval, check_finite};
 
 /// The result of evaluating [Definition 3.1] via [Equation 4.1].
@@ -178,24 +179,34 @@ pub fn risk_adjusted_evalue(
     // Group into distinct sorted score values with their per-value loss
     // sum -- a zero-loss placeholder represents the test point's own
     // score, since `M` includes it alongside the calibration scores.
+    //
+    // Sorted by `(score, loss)`, not score alone: a stable sort keyed only
+    // on score would leave entries tied at the same score in whatever
+    // relative order the caller's input happened to have, so two calls
+    // with the same `(score, loss)` multiset but a different input order
+    // could sum a tied group's losses in a different sequence and land on
+    // a different floating-point rounding. The secondary `loss` key makes
+    // the grouped sum depend only on the multiset, never on input order
+    // (see `tests::ties_are_summed_in_a_canonical_order_not_input_order`).
     let mut entries: Vec<(f64, f64)> = calibration_scores
         .iter()
         .zip(calibration_losses.iter())
         .map(|(&score, &loss)| (normalize_zero(score), loss.get()))
         .collect();
     entries.push((test_score, 0.0));
-    entries.sort_by(|a, b| a.0.total_cmp(&b.0));
+    entries.sort_by(|a, b| a.0.total_cmp(&b.0).then_with(|| a.1.total_cmp(&b.1)));
 
     let mut values: Vec<f64> = Vec::new();
     let mut per_value_sum: Vec<f64> = Vec::new();
-    for (score, loss) in entries {
-        if values.last() == Some(&score) {
-            *per_value_sum
-                .last_mut()
-                .expect("values and per_value_sum stay in lockstep") += loss;
-        } else {
-            values.push(score);
-            per_value_sum.push(loss);
+    let mut group_start = 0;
+    for i in 0..=entries.len() {
+        let at_boundary = i == entries.len() || entries[i].0 != entries[group_start].0;
+        if at_boundary && i > group_start {
+            values.push(entries[group_start].0);
+            per_value_sum.push(kahan_sum(
+                entries[group_start..i].iter().map(|&(_, loss)| loss),
+            ));
+            group_start = i;
         }
     }
 
@@ -366,6 +377,49 @@ mod tests {
         // 1.0 (0.5+0.5); at l=1, contribution=1.0+1=2.0<=2.7, feasible,
         // objective=3/(1.0+1.0)=1.5; l=0 gives 3/(1.0+0)=3.0. Min is 1.5.
         assert!((outcome.value.get() - 1.5).abs() < 1e-12);
+    }
+
+    /// Regression test: a prior version of this function grouped tied
+    /// calibration scores via a stable sort keyed on score alone, leaving
+    /// the summation order within a tied group equal to input order --
+    /// confirmed to produce different bit patterns (not just different
+    /// rounding within tolerance) for `[0.1, 0.2, 0.3, 1e-16, 1e-12,
+    /// 1.0 - 1e-16, 0.1, 0.3, 1e-12, 0.2]` forward versus reversed before
+    /// this fix. Grouping now sorts by `(score, loss)`, so the tied
+    /// group's summation order depends only on its multiset of loss
+    /// values, never on input order.
+    #[test]
+    fn ties_are_summed_in_a_canonical_order_not_input_order() {
+        let tied_losses = [
+            0.1,
+            0.2,
+            0.3,
+            1e-16,
+            1e-12,
+            1.0 - 1e-16,
+            0.1,
+            0.3,
+            1e-12,
+            0.2,
+        ];
+        let score = 5.0;
+        let scores = vec![score; tied_losses.len()];
+        let gamma = OpenUnitInterval::new("gamma", 0.5).unwrap();
+
+        let forward = risk_adjusted_evalue(&losses(&tied_losses), &scores, score, gamma).unwrap();
+
+        let mut reversed_losses = tied_losses.to_vec();
+        reversed_losses.reverse();
+        let reversed =
+            risk_adjusted_evalue(&losses(&reversed_losses), &scores, score, gamma).unwrap();
+
+        let permutation = [3, 0, 7, 1, 9, 2, 5, 8, 4, 6];
+        let permuted_losses: Vec<f64> = permutation.iter().map(|&i| tied_losses[i]).collect();
+        let permuted =
+            risk_adjusted_evalue(&losses(&permuted_losses), &scores, score, gamma).unwrap();
+
+        assert_eq!(forward.value.get(), reversed.value.get());
+        assert_eq!(forward.value.get(), permuted.value.get());
     }
 
     #[cfg(feature = "serde")]

@@ -307,6 +307,32 @@ All notable changes to `risksieve` are documented here. Format follows
   reason: a contributor cloning this repository from GitHub had no way to
   read either file before this change).
 
+### Fixed
+
+- `risksieve::selective::evalue::risk_adjusted_evalue`: tied calibration
+  scores were grouped via a stable sort keyed on score alone, leaving a
+  tied group's loss-summation order equal to caller input order; two
+  calls with the same `(score, loss)` multiset but a different input
+  order could therefore land on a different floating-point rounding for
+  loss values not exactly representable in binary (confirmed to produce
+  different bit patterns, not just different rounding within tolerance,
+  for a constructed adversarial input). This contradicts the permutation
+  invariance this function's own property test
+  (`construction_is_permutation_invariant`) already covered with a
+  powers-of-two-friendly loss alphabet that happened to mask the bug.
+  Found while building the weighted e-value construction below, whose
+  property tests reuse the same "weight = 1 matches unweighted" check
+  across adversarial loss values and would otherwise have been comparing
+  against a non-deterministic reference. Fixed by sorting calibration
+  entries by `(score, loss)` before grouping (the same fix applied to
+  `selective::coupled::coupled_risk_adjusted_evalues` previously), so the
+  grouped sum depends only on the multiset of loss values, never on input
+  order; added a regression test with the same adversarial loss alphabet
+  used there. No public API changed; only the exact floating-point result
+  for calibration sets with ties at an identical score and specific
+  non-representable loss values can differ from before this fix (and only
+  by ULPs).
+
 ### Not yet implemented
 
 Milestone 7 in AGENTS.md section 7 (downstream examples) is still open.
