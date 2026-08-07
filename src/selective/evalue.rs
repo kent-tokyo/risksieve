@@ -36,6 +36,18 @@
 //! reduce *selection power* (how often a genuinely trustworthy point gets
 //! deployed), even though it never breaks the guarantee itself.
 //!
+//! **Score orientation:** lower is what makes deployment possible. Every
+//! numerator indicator in Equation (4.1) is `1{s(X_{n+1}) <= t_gamma(l)}`;
+//! a test point whose score exceeds every value in `M` makes that
+//! indicator `0` for every `l`, so its e-value is exactly `0` --
+//! guaranteed abstention. A score at or below some feasible threshold is
+//! therefore necessary (though not on its own sufficient) for a positive
+//! e-value. Callers must orient `s(.)` so that a lower score means a more
+//! trustworthy prediction -- this convention is not inferred from the
+//! caller's inputs, and getting it backwards silently inverts which
+//! points are eligible for deployment without triggering any validation
+//! error.
+//!
 //! ## How the infimum is computed
 //!
 //! `F(t;l)` is non-decreasing in both `t` and `l` (each term is an

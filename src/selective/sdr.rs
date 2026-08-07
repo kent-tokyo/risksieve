@@ -51,6 +51,10 @@
 //! [`super::evalue`]'s module docs; the same caution about selection power
 //! applies here.
 //!
+//! **Score orientation:** see [`super::evalue`]'s module docs -- the same
+//! lower-score-enables-deployment convention applies to both the coupled
+//! (Equation 5.1) and independent (Equation 4.1) constructions here.
+//!
 //! **Provenance:** this paper postdates this project's training-data
 //! cutoff. The SDR definition, Algorithm 2's structure, and Theorem 3.3
 //! were cross-checked across independent fetches that agreed
