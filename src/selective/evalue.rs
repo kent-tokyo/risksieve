@@ -152,6 +152,15 @@ fn feasibility_epsilon(gamma_scaled: f64) -> f64 {
 /// // exceeds the only calibration score (0.0) for every `l > 0`, so the
 /// // objective is 0 almost everywhere on `[0,1]` and the infimum is 0.
 /// assert_eq!(outcome.value.get(), 0.0);
+///
+/// // Score orientation, shown by contrast: swap which point scores higher
+/// // (calibration now at 1.0, test point now at 0.0, the lowest score in
+/// // `M`) and the same construction gives a strictly positive e-value --
+/// // also worked out by hand in tests/paper_score_mdr.rs.
+/// let losses = [ClosedUnitInterval::new("loss", 0.0)?];
+/// let scores = [1.0];
+/// let outcome = risk_adjusted_evalue(&losses, &scores, 0.0, OpenUnitInterval::new("gamma", 0.5)?)?;
+/// assert_eq!(outcome.value.get(), 2.0);
 /// # Ok::<(), risksieve::RiskSieveError>(())
 /// ```
 pub fn risk_adjusted_evalue(

@@ -5,6 +5,19 @@ All notable changes to `risksieve` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-07
+
+### Added
+
+- `categories` and `keywords` in `Cargo.toml`, for crates.io discovery
+  (`science`, `algorithms`, `mathematics`; `conformal-prediction`,
+  `risk-control`, `calibration`, `uncertainty`, `statistics`).
+- `risksieve::selective::evalue::risk_adjusted_evalue`'s doctest now
+  contrasts a test score above every value in `M` (e-value `0`, the case
+  already shown) against one at or below every value in `M` (e-value
+  `2.0`), so the score-orientation convention documented in `0.2.0`'s
+  module docs has a runnable, checked example rather than only prose.
+
 ## [0.2.0] - 2026-08-07
 
 ### Changed

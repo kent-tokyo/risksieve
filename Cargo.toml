@@ -1,12 +1,14 @@
 [package]
 name = "risksieve"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
 description = "Finite-sample and anytime-valid conformal risk control certificates for predictions and decisions."
 readme = "README.md"
 repository = "https://github.com/kent-tokyo/risksieve"
+categories = ["science", "algorithms", "mathematics"]
+keywords = ["conformal-prediction", "risk-control", "calibration", "uncertainty", "statistics"]
 
 [dependencies]
 thiserror = "1"
